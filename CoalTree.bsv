@@ -143,22 +143,18 @@ instance Coalescer#(n, t) provisos (
             end else begin // (Inval, ?)
               out.enq(selR); g1.deq; g2.deq;
             end
-          end else begin
-            if (epoch1 == epoch) begin
-              out.enq(selL); g1.deq;
-            end else begin // epoch2 == epoch
-              out.enq(selR); g2.deq;
-            end
+          end else if (epoch1 == epoch) begin
+            out.enq(selL); g1.deq;
+          end else begin // epoch2 == epoch
+            out.enq(selR); g2.deq;
           end
         end else begin
           epoch <= epoch1;
           out.enq(selL); g1.deq;
         end
-      end else begin
-        if (g2.notEmpty) begin
-          epoch <= epoch2;
-          out.enq(selR); g2.deq;
-        end
+      end else if (g2.notEmpty) begin
+        epoch <= epoch2;
+        out.enq(selR); g2.deq;
       end
     endrule
 
