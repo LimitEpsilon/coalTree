@@ -26,7 +26,7 @@ endtypeclass
 instance Coalescer#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
   module mkCoalTree(CoalTree#(1, t));
-    FIFOF#(EpochReq#(1, t)) in <- mkFIFOF;
+    FIFOF#(EpochReq#(1, t)) in <- mkGFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
     method Action enq(v);
@@ -41,7 +41,7 @@ instance Coalescer#(1, t) provisos (Bits#(t, tSz));
 
     method notEmpty = in.notEmpty;
 
-    method deq = in.deq;
+    method deq = in.deq; // must be called under if (notEmpty)
 
     method first = in.first;
   endmodule
@@ -58,52 +58,63 @@ instance Coalescer#(n, t) provisos (
     // two subtrees
     CoalTree#(hn, t) g1 <- mkCoalTree;
     CoalTree#(hm, t) g2 <- mkCoalTree;
-    FIFOF#(EpochReq#(n, t)) out <- mkFIFOF;
+    FIFOF#(EpochReq#(n, t)) out <- mkGFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
     (* fire_when_enabled *)
     rule get_result;
-      match {.res1, .epoch1} = g1.notEmpty ? g1.first : ?;
-      match {.res2, .epoch2} = g2.notEmpty ? g2.first : ?;
+      match {.req1, .epoch1} = g1.first;
+      match {.req2, .epoch2} = g2.first;
 
-      let req1 = fromMaybe(?, res1);
-      let req2 = fromMaybe(?, res2);
+      EpochReq#(n, t) selL = begin
+        let req = case (req1) matches
+          tagged Valid .reqL:
+            tagged Valid (CoalReq {
+              mask: append(reqL.mask, replicate(False)),
+              req: reqL.req
+            });
+          tagged Invalid: tagged Invalid;
+        endcase;
+        tuple2(req, epoch1);
+      end; // select left
 
-      let select = compare(pack(req1.req), pack(req2.req));
+      EpochReq#(n, t) selR = begin
+        let req = case (req2) matches
+          tagged Valid .reqR:
+            tagged Valid (CoalReq {
+              mask: append(replicate(False), reqR.mask),
+              req: reqR.req
+            });
+          tagged Invalid: tagged Invalid;
+        endcase;
+        tuple2(req, epoch2);
+      end; // select right
 
-      let req1Valid = isValid(res1);
-      let req2Valid = isValid(res2);
-
-      EpochReq#(n, t) selL = tuple2(
-        req1Valid ?
-        tagged Valid (CoalReq {
-          mask: append(req1.mask, replicate(False)),
-          req: req1.req
-        }) : tagged Invalid, epoch1); // select left
-      EpochReq#(n, t) selR = tuple2(
-        req2Valid ?
-        tagged Valid (CoalReq {
-          mask: append(replicate(False), req2.mask),
-          req: req2.req
-        }) : tagged Invalid, epoch2); // select right
-      EpochReq#(n, t) selB = tuple2(
-        tagged Valid (CoalReq {
-          mask: append(req1.mask, req2.mask),
-          req: req1.req
-        }), epoch1); // select both
+      EpochReq#(n, t) selB = begin
+        let req = case (tuple2(req1, req2)) matches
+          {tagged Valid .reqL, tagged Valid .reqR}:
+            tagged Valid (CoalReq {
+              mask: append(reqL.mask, reqR.mask),
+              req: reqL.req
+            });
+          default: tagged Invalid;
+        endcase;
+        tuple2(req, epoch1);
+      end; // select both
 
       case (tuple2(g1.notEmpty, g2.notEmpty)) matches
         {True, True}:
           if (epoch1 == epoch2) begin
             epoch <= epoch1;
-            case (tuple2(req1Valid, req2Valid)) matches
-              {True, True}:
-                case (select)
-                  LT: begin out.enq(selL); g1.deq; end
-                  GT: begin out.enq(selR); g2.deq; end
-                  EQ: begin out.enq(selB); g1.deq; g2.deq; end
-                endcase
-              {True, False}: begin out.enq(selL); g1.deq; g2.deq; end
+            case (tuple2(req1, req2)) matches
+              {tagged Valid .reqL, tagged Valid .reqR}: begin
+                let sel = compare(pack(reqL.req), pack(reqR.req));
+                let toEnq = case (sel) LT: selL; GT: selR; EQ: selB; endcase;
+                out.enq(toEnq);
+                if (sel != GT) g1.deq;
+                if (sel != LT) g2.deq;
+              end
+              {tagged Valid .*, .*}: begin out.enq(selL); g1.deq; g2.deq; end
               default: begin out.enq(selR); g1.deq; g2.deq; end
             endcase
           end else if (epoch1 == epoch) begin
@@ -124,7 +135,7 @@ instance Coalescer#(n, t) provisos (
 
     method notEmpty = out.notEmpty;
 
-    method deq = out.deq;
+    method deq = out.deq; // must be called under if (notEmpty)
 
     method first = out.first;
   endmodule
