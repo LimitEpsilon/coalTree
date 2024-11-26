@@ -17,10 +17,11 @@ endmodule
 (* synthesize *)
 module mkTop(Empty);
   CoalTree#(VecWidth, TestData) tree <- coalTree;
-  Randomize#(Vector#(VecWidth, Bool)) randomPred <- mkGenericRandomizer;
+  Randomize#(Bool) randomEnq <- mkGenericRandomizer;
+  Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, TestData)) randomData <- mkGenericRandomizer;
+  Reg#(Bool) finish <- mkReg(False);
   Reg#(UInt#(32)) inCount <- mkReg(0);
-  Reg#(Bool) started <- mkReg(False);
   Reg#(UInt#(32)) cycle <- mkReg(0);
   UInt#(32) threshold = 32;
 
@@ -29,7 +30,8 @@ module mkTop(Empty);
   (* execution_order = "test, increment" *)
   rule increment;
     if (cycle == 0) begin
-      randomPred.cntrl.init;
+      randomEnq.cntrl.init;
+      randomInv.cntrl.init;
       randomData.cntrl.init;
     end
     $display("Cycle: %d over --------------------------------------------------", cycle);
@@ -38,14 +40,17 @@ module mkTop(Empty);
 
   (* fire_when_enabled *)
   rule put(inCount < threshold);
-    function Maybe#(TestData) f(Bool pred, TestData data) =
-      pred ? tagged Invalid : tagged Valid data;
-    let pred <- randomPred.next;
+    function Maybe#(TestData) f(Bool inv, TestData data) =
+      inv ? tagged Invalid : tagged Valid data;
+    let doEnq <- randomEnq.next;
+    let inv <- randomInv.next;
     let data <- randomData.next;
-    let v = zipWith(f, pred, data);
-    $display(fshow("Enq: ") + fshow(v));
-    tree.enq(v);
-    inCount <= inCount + 1;
+    let v = zipWith(f, inv, data);
+    if (doEnq) begin
+      $display(fshow("Enq: ") + fshow(v));
+      tree.enq(v);
+      inCount <= inCount + 1;
+    end
   endrule
 
   (* fire_when_enabled *)
@@ -53,11 +58,13 @@ module mkTop(Empty);
     let notEmpty = tree.notEmpty;
     let res = notEmpty ? tpl_1(tree.first) : tagged Invalid;
     if (notEmpty) begin
-      started <= True;
       $display(fshow("Deq: ") + fshow(res));
       tree.deq;
-    end else if (started) begin
-      $finish;
-    end
+    end else if (inCount == threshold)
+      if (!finish) begin
+        finish <= True;
+      end else begin
+        $finish;
+      end
   endrule
 endmodule
