@@ -20,12 +20,12 @@ interface CoalTree#(numeric type n, type t);
 endinterface
 
 typeclass Coalescer#(numeric type n, type t);
-  module mkCoalTree(CoalTree#(n, t));
+  module mkCoalTree_(CoalTree#(n, t));
 endtypeclass
 
 instance Coalescer#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
-  module mkCoalTree(CoalTree#(1, t));
+  module mkCoalTree_(CoalTree#(1, t));
     FIFOF#(EpochReq#(1, t)) in <- mkGFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
@@ -54,10 +54,10 @@ instance Coalescer#(n, t) provisos (
 );
 
   // General case
-  module mkCoalTree(CoalTree#(n, t));
+  module mkCoalTree_(CoalTree#(n, t));
     // two subtrees
-    CoalTree#(hn, t) g1 <- mkCoalTree;
-    CoalTree#(hm, t) g2 <- mkCoalTree;
+    CoalTree#(hn, t) g1 <- mkCoalTree_;
+    CoalTree#(hm, t) g2 <- mkCoalTree_;
     FIFOF#(EpochReq#(n, t)) out <- mkGFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
@@ -140,4 +140,13 @@ instance Coalescer#(n, t) provisos (
     method first = out.first;
   endmodule
 endinstance
+
+// guard deq and first only at the interface
+module mkCoalTree(CoalTree#(n, t)) provisos (Coalescer#(n, t));
+  CoalTree#(n, t) inner <- mkCoalTree_;
+  method enq = inner.enq;
+  method notEmpty = inner.notEmpty;
+  method deq if (inner.notEmpty) = inner.deq;
+  method first if (inner.notEmpty) = inner.first;
+endmodule
 

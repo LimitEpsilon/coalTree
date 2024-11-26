@@ -5,23 +5,22 @@ import Vector::*;
 typedef 32 VecWidth;
 typedef UInt#(2) TestData;
 
-// guard deq, first
 (* synthesize *)
 module coalTree(CoalTree#(VecWidth, TestData));
-  CoalTree#(VecWidth, TestData) inner <- mkCoalTree;
-  method enq = inner.enq;
-  method notEmpty = inner.notEmpty;
-  method deq if (inner.notEmpty) = inner.deq;
-  method first if (inner.notEmpty) = inner.first;
+  CoalTree#(VecWidth, TestData) c <- mkCoalTree;
+  method enq = c.enq;
+  method notEmpty = c.notEmpty;
+  method deq = c.deq;
+  method first = c.first;
 endmodule
 
 (* synthesize *)
 module mkTop(Empty);
-  CoalTree#(VecWidth, TestData) tree <- coalTree;
+  let tree <- coalTree;
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, TestData)) randomData <- mkGenericRandomizer;
-  Reg#(Bool) finish <- mkReg(False);
+  let finish <- mkReg(False);
   Reg#(UInt#(32)) inCount <- mkReg(0);
   Reg#(UInt#(32)) cycle <- mkReg(0);
   UInt#(32) threshold = 32;
