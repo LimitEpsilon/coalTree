@@ -1,4 +1,4 @@
-BSC_FLAGS=-sim -aggressive-conditions -keep-fires
+BSC_FLAGS=-sim -aggressive-conditions -keep-fires -show-schedule
 
 compile:
 	mkdir -p buildDir

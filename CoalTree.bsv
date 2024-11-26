@@ -57,34 +57,24 @@ endtypeclass
 instance Coalescer#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
   module mkCoalTree(CoalTree#(1, t));
-    Reg#(EpochReq#(1, t)) in <- mkReg(tuple2(tagged Invalid, True));
+    EpochFifo#(1, t) in <- mkEpochFifo;
     Reg#(Bool) epoch <- mkReg(False);
-    Reg#(Bool) empty[2] <- mkCReg(2, False); // start with full state
-    Reg#(Bool) full[2] <- mkCReg(2, True);   // for normalization
 
-    method Action enq(v) if (!full[1]);
+    method Action enq(v);
       let req = case (v[0]) matches
         tagged Invalid: tagged Invalid;
         tagged Valid .req:
           tagged Valid (CoalReq {mask: replicate(True), req: req});
       endcase;
-      in <= tuple2(req, epoch);
+      in.enq(tuple2(req, epoch));
       epoch <= !epoch;
-      empty[1] <= False;
-      full[1] <= True;
     endmethod
 
-    method Bool notEmpty = !empty[0];
+    method Bool notEmpty = in.notEmpty;
 
-    method Action deq if (!empty[0]);
-      // Tell later stages a dequeue was requested
-      full[0] <= False;
-      empty[0] <= True;
-    endmethod
+    method Action deq = in.deq;
 
-    method EpochReq#(1, t) first if (!empty[0]);
-      return in;
-    endmethod
+    method EpochReq#(1, t) first = in.first;
   endmodule
 endinstance
 
@@ -177,17 +167,11 @@ instance Coalescer#(n, t) provisos (
       g2.enq(takeTail(v));
     endmethod
 
-    method Bool notEmpty;
-      return out.notEmpty;
-    endmethod
+    method Bool notEmpty = out.notEmpty;
 
-    method Action deq;
-      out.deq;
-    endmethod
+    method Action deq = out.deq;
 
-    method EpochReq#(n, t) first;
-      return out.first;
-    endmethod
+    method EpochReq#(n, t) first = out.first;
   endmodule
 endinstance
 
