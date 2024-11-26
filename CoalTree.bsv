@@ -108,11 +108,11 @@ instance Coalescer#(n, t) provisos (
             epoch <= epoch1;
             case (tuple2(req1, req2)) matches
               {tagged Valid .reqL, tagged Valid .reqR}: begin
-                let sel = compare(pack(reqL.req), pack(reqR.req));
-                let toEnq = case (sel) LT: selL; GT: selR; EQ: selB; endcase;
-                out.enq(toEnq);
-                if (sel != GT) g1.deq;
-                if (sel != LT) g2.deq;
+                let dir = compare(pack(reqL.req), pack(reqR.req));
+                let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
+                out.enq(sel);
+                if (dir != GT) g1.deq;
+                if (dir != LT) g2.deq;
               end
               {tagged Valid .*, .*}: begin out.enq(selL); g1.deq; g2.deq; end
               default: begin out.enq(selR); g1.deq; g2.deq; end
