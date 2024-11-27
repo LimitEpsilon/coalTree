@@ -46,7 +46,7 @@ instance Merger#(n, t) provisos (
     MergeTree#(hn, t) g1 <- mkMergeTree_;
     MergeTree#(hm, t) g2 <- mkMergeTree_;
     Reg#(Bool) leftHasPrio <- mkReg (True);
-    FIFOF#(t) out <- mkFIFOF;
+    FIFOF#(t) out <- mkGFIFOF(False, True);
 
     (* fire_when_enabled *)
     rule arbitrate_both(g1.notEmpty && g2.notEmpty);
