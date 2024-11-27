@@ -46,10 +46,10 @@ module mkTop(Empty);
     let v = zipWith(f, inv, data);
     if (inCount < threshold && any(id, inv) && doEnq) begin
       $display(fshow("Enq: ") + fshow(v));
-      tree.enq(v);
+      let e <- tree.enq(v);
       inCount <= inCount + 1;
     end else if (inCount == threshold) begin
-      tree.enq(replicate(tagged Invalid)); // mark the end
+      let e <- tree.enq(replicate(tagged Invalid)); // mark the end
     end
   endrule
 

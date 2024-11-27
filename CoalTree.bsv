@@ -13,7 +13,7 @@ typedef
   EpochReq#(numeric type n, type t);
 
 interface CoalTree#(numeric type n, type t);
-  method Action enq(Vector#(n, Maybe#(t)) v);
+  method ActionValue#(Bool) enq(Vector#(n, Maybe#(t)) v); // returns the epoch
   method Bool notEmpty;
   method Action deq;
   method EpochReq#(n, t) first;
@@ -29,14 +29,16 @@ instance Coalescer#(1, t) provisos (Bits#(t, tSz));
     FIFOF#(EpochReq#(1, t)) in <- mkGFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
-    method Action enq(v);
+    method ActionValue#(Bool) enq(Vector#(1, Maybe#(t)) v);
       let req = case (v[0]) matches
         tagged Invalid: tagged Invalid;
         tagged Valid .req:
           tagged Valid (CoalReq {mask: replicate(True), req: req});
       endcase;
-      in.enq(tuple2(req, epoch));
-      epoch <= !epoch;
+      let e = epoch;
+      in.enq(tuple2(req, e));
+      epoch <= !e;
+      return e;
     endmethod
 
     method notEmpty = in.notEmpty;
@@ -136,9 +138,10 @@ instance Coalescer#(n, t) provisos (
       r.deq;
     endrule
 
-    method Action enq(v);
-      l.enq(take(v));
-      r.enq(takeTail(v));
+    method ActionValue#(Bool) enq(Vector#(n, Maybe#(t)) v);
+      let eL <- l.enq(take(v));
+      let eR <- r.enq(takeTail(v));
+      return eL;
     endmethod
 
     method notEmpty = out.notEmpty;
