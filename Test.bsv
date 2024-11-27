@@ -9,24 +9,13 @@ typedef UInt#(1) TestData;
 (* synthesize *)
 module coalTree(CoalTree#(VecWidth, TestData));
   CoalTree#(VecWidth, TestData) c <- mkCoalTree;
-  method enq = c.enq;
-  method notEmpty = c.notEmpty;
-  method deq = c.deq;
-  method first = c.first;
-endmodule
-
-(* synthesize *)
-module mergeTree(MergeTree#(VecWidth, TestData));
-  MergeTree#(VecWidth, TestData) m <- mkMergeTree;
-  method enq = m.enq;
-  method notEmpty = m.notEmpty;
-  method deq = m.deq;
-  method first = m.first;
+  return c;
 endmodule
 
 (* synthesize *)
 module mkTop(Empty);
   let tree <- coalTree;
+  MergeTree#(VecWidth, TestData) m <- mkMergeTree;
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, TestData)) randomData <- mkGenericRandomizer;
