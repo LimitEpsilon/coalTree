@@ -20,12 +20,12 @@ interface CoalTree#(numeric type n, type t);
 endinterface
 
 typeclass Coalescer#(numeric type n, type t);
-  module mkCoalTree_(CoalTree#(n, t));
+  module mkCoalTree_(function Ordering comp(t x, t y), CoalTree#(n, t) ifc);
 endtypeclass
 
 instance Coalescer#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
-  module mkCoalTree_(CoalTree#(1, t));
+  module mkCoalTree_(function Ordering comp(t x, t y), CoalTree#(1, t) ifc);
     FIFOF#(EpochReq#(1, t)) in <- mkGFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
@@ -56,10 +56,10 @@ instance Coalescer#(n, t) provisos (
 );
 
   // General case
-  module mkCoalTree_(CoalTree#(n, t));
+  module mkCoalTree_(function Ordering comp(t x, t y), CoalTree#(n, t) ifc);
     // two subtrees
-    CoalTree#(hn, t) l <- mkCoalTree_;
-    CoalTree#(hm, t) r <- mkCoalTree_;
+    CoalTree#(hn, t) l <- mkCoalTree_(comp);
+    CoalTree#(hm, t) r <- mkCoalTree_(comp);
     FIFOF#(EpochReq#(n, t)) out <- mkGFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
@@ -108,7 +108,7 @@ instance Coalescer#(n, t) provisos (
         epoch <= epochL;
         case (tuple2(reqL, reqR)) matches
           {tagged Valid .rL, tagged Valid .rR}: begin
-            let dir = compare(pack(rL.req), pack(rR.req));
+            let dir = comp(rL.req, rR.req);
             let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
             out.enq(sel);
             if (dir != GT) l.deq;
@@ -153,8 +153,10 @@ instance Coalescer#(n, t) provisos (
 endinstance
 
 // guard deq and first only at the interface
-module mkCoalTree(CoalTree#(n, t)) provisos (Coalescer#(n, t));
-  CoalTree#(n, t) inner <- mkCoalTree_;
+module mkCoalTree(function Ordering comp (t x, t y), CoalTree#(n, t) ifc) provisos (
+  Coalescer#(n, t)
+);
+  CoalTree#(n, t) inner <- mkCoalTree_(comp);
   method enq = inner.enq;
   method notEmpty = inner.notEmpty;
   method deq if (inner.notEmpty) = inner.deq;

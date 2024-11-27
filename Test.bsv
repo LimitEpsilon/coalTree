@@ -6,9 +6,11 @@ import Vector::*;
 typedef 32 VecWidth;
 typedef UInt#(1) TestData;
 
+function Ordering comp (TestData x, TestData y) = compare(pack(x), pack(y));
+
 (* synthesize *)
 module coalTree(CoalTree#(VecWidth, TestData));
-  CoalTree#(VecWidth, TestData) c <- mkCoalTree;
+  CoalTree#(VecWidth, TestData) c <- mkCoalTree(comp);
   return c;
 endmodule
 
