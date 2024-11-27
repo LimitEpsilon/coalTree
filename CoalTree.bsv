@@ -61,71 +61,79 @@ instance Coalescer#(n, t) provisos (
     FIFOF#(EpochReq#(n, t)) out <- mkGFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
+    match {.req1, .epoch1} = g1.first;
+    match {.req2, .epoch2} = g2.first;
+
+    EpochReq#(n, t) selL = begin
+      let req = case (req1) matches
+        tagged Valid .reqL:
+          tagged Valid (CoalReq {
+            mask: append(reqL.mask, replicate(False)),
+            req: reqL.req
+          });
+        tagged Invalid: tagged Invalid;
+      endcase;
+      tuple2(req, epoch1);
+    end; // select left
+
+    EpochReq#(n, t) selR = begin
+      let req = case (req2) matches
+        tagged Valid .reqR:
+          tagged Valid (CoalReq {
+            mask: append(replicate(False), reqR.mask),
+            req: reqR.req
+          });
+        tagged Invalid: tagged Invalid;
+      endcase;
+      tuple2(req, epoch2);
+    end; // select right
+
+    EpochReq#(n, t) selB = begin
+      let req = case (tuple2(req1, req2)) matches
+        {tagged Valid .reqL, tagged Valid .reqR}:
+          tagged Valid (CoalReq {
+            mask: append(reqL.mask, reqR.mask),
+            req: reqL.req
+          });
+        default: tagged Invalid;
+      endcase;
+      tuple2(req, epoch1);
+    end; // select both
+
     (* fire_when_enabled *)
-    rule get_result;
-      match {.req1, .epoch1} = g1.first;
-      match {.req2, .epoch2} = g2.first;
-
-      EpochReq#(n, t) selL = begin
-        let req = case (req1) matches
-          tagged Valid .reqL:
-            tagged Valid (CoalReq {
-              mask: append(reqL.mask, replicate(False)),
-              req: reqL.req
-            });
-          tagged Invalid: tagged Invalid;
-        endcase;
-        tuple2(req, epoch1);
-      end; // select left
-
-      EpochReq#(n, t) selR = begin
-        let req = case (req2) matches
-          tagged Valid .reqR:
-            tagged Valid (CoalReq {
-              mask: append(replicate(False), reqR.mask),
-              req: reqR.req
-            });
-          tagged Invalid: tagged Invalid;
-        endcase;
-        tuple2(req, epoch2);
-      end; // select right
-
-      EpochReq#(n, t) selB = begin
-        let req = case (tuple2(req1, req2)) matches
-          {tagged Valid .reqL, tagged Valid .reqR}:
-            tagged Valid (CoalReq {
-              mask: append(reqL.mask, reqR.mask),
-              req: reqL.req
-            });
-          default: tagged Invalid;
-        endcase;
-        tuple2(req, epoch1);
-      end; // select both
-
-      case (tuple2(g1.notEmpty, g2.notEmpty)) matches
-        {True, True}:
-          if (epoch1 == epoch2) begin
-            epoch <= epoch1;
-            case (tuple2(req1, req2)) matches
-              {tagged Valid .reqL, tagged Valid .reqR}: begin
-                let dir = compare(pack(reqL.req), pack(reqR.req));
-                let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
-                out.enq(sel);
-                if (dir != GT) g1.deq;
-                if (dir != LT) g2.deq;
-              end
-              {tagged Valid .*, .*}: begin out.enq(selL); g1.deq; g2.deq; end
-              default: begin out.enq(selR); g1.deq; g2.deq; end
-            endcase
-          end else if (epoch1 == epoch) begin
-            out.enq(selL); g1.deq;
-          end else begin // epoch2 == epoch
-            out.enq(selR); g2.deq;
+    rule get_result_both(g1.notEmpty && g2.notEmpty);
+      if (epoch1 == epoch2) begin
+        epoch <= epoch1;
+        case (tuple2(req1, req2)) matches
+          {tagged Valid .reqL, tagged Valid .reqR}: begin
+            let dir = compare(pack(reqL.req), pack(reqR.req));
+            let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
+            out.enq(sel);
+            if (dir != GT) g1.deq;
+            if (dir != LT) g2.deq;
           end
-        {True, False}: begin epoch <= epoch1; out.enq(selL); g1.deq; end
-        {False, True}: begin epoch <= epoch2; out.enq(selR); g2.deq; end
-        {False, False}: noAction;
-      endcase
+          {tagged Valid .*, .*}: begin out.enq(selL); g1.deq; g2.deq; end
+          default: begin out.enq(selR); g1.deq; g2.deq; end
+        endcase
+      end else if (epoch1 == epoch) begin
+        out.enq(selL); g1.deq;
+      end else begin // epoch2 == epoch
+        out.enq(selR); g2.deq;
+      end
+    endrule
+
+    (* fire_when_enabled *)
+    rule get_result_left(g1.notEmpty && !g2.notEmpty);
+      epoch <= epoch1;
+      out.enq(selL);
+      g1.deq;
+    endrule
+
+    (* fire_when_enabled *)
+    rule get_result_right(!g1.notEmpty && g2.notEmpty);
+      epoch <= epoch2;
+      out.enq(selR);
+      g2.deq;
     endrule
 
     method Action enq(v);

@@ -1,5 +1,6 @@
 import Randomizable::*;
 import CoalTree::*;
+import MergeTree::*;
 import Vector::*;
 
 typedef 32 VecWidth;
@@ -12,6 +13,15 @@ module coalTree(CoalTree#(VecWidth, TestData));
   method notEmpty = c.notEmpty;
   method deq = c.deq;
   method first = c.first;
+endmodule
+
+(* synthesize *)
+module mergeTree(MergeTree#(VecWidth, TestData));
+  MergeTree#(VecWidth, TestData) m <- mkMergeTree;
+  method enq = m.enq;
+  method notEmpty = m.notEmpty;
+  method deq = m.deq;
+  method first = m.first;
 endmodule
 
 (* synthesize *)
