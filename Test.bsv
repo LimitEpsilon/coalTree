@@ -15,9 +15,15 @@ module coalTree(CoalTree#(VecWidth, TestData));
 endmodule
 
 (* synthesize *)
-module mkTop(Empty);
-  let tree <- coalTree;
+module mergeTree(MergeTree#(VecWidth, TestData));
   MergeTree#(VecWidth, TestData) m <- mkMergeTree;
+  return m;
+endmodule
+
+(* synthesize *)
+module mkTop(Empty);
+  let cTree <- coalTree;
+  let mTree <- mergeTree;
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, TestData)) randomData <- mkGenericRandomizer;
@@ -48,23 +54,23 @@ module mkTop(Empty);
     let v = zipWith(f, inv, data);
     if (inCount < threshold && any(id, inv) && doEnq) begin
       $display(fshow("Enq: ") + fshow(v));
-      let e <- tree.enq(v);
+      let e <- cTree.enq(v);
       inCount <= inCount + 1;
     end else if (inCount == threshold) begin
-      let e <- tree.enq(replicate(tagged Invalid)); // mark the end
+      let e <- cTree.enq(replicate(tagged Invalid)); // mark the end
     end
   endrule
 
   (* fire_when_enabled *)
   rule test;
-    let notEmpty = tree.notEmpty;
-    let res = notEmpty ? tpl_1(tree.first) : tagged Invalid;
+    let notEmpty = cTree.notEmpty;
+    let res = notEmpty ? tpl_1(cTree.first) : tagged Invalid;
     case (res) matches
       tagged Invalid:
         if (notEmpty && inCount == threshold) $finish;
       tagged Valid .x: begin
         $display(fshow("Deq: ") + fshow(x));
-        tree.deq;
+        cTree.deq;
       end
     endcase
   endrule

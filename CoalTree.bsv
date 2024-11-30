@@ -156,6 +156,7 @@ endinstance
 module mkCoalTree(function Ordering comp (t x, t y), CoalTree#(n, t) ifc) provisos (
   Coalescer#(n, t)
 );
+  (* hide *)
   CoalTree#(n, t) inner <- mkCoalTree_(comp);
   method enq = inner.enq;
   method notEmpty = inner.notEmpty;
