@@ -1,6 +1,7 @@
 import Randomizable::*;
 import CoalTree::*;
 import MergeTree::*;
+import VectorMem::*;
 import Vector::*;
 
 typedef 32 VecWidth;
@@ -21,9 +22,15 @@ module mergeTree(MergeTree#(VecWidth, TestData));
 endmodule
 
 (* synthesize *)
+module vectorMem(VecMemoryServer#(VecWidth, 32, 32));
+  let dummy <- mkDummyMemoryServer;
+  let ret <- mkVecMemoryServer(dummy);
+  return ret;
+endmodule
+
+(* synthesize *)
 module mkTop(Empty);
   let cTree <- coalTree;
-  let mTree <- mergeTree;
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, TestData)) randomData <- mkGenericRandomizer;
