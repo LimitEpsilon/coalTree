@@ -69,9 +69,9 @@ module mkVecMemoryServer(MemoryServer#(a, d) m, VecMemoryServer#(n, a, d) ifc)
 
   (* fire_when_enabled *)
   rule set_leftover(!isLeftover && cleared[1]);
-    leftover <= respMasks.first;
+    leftover <= outMasks.first;
     outBuf <= replicate(tagged Invalid);
-    respMasks.deq;
+    outMasks.deq;
     cleared[1] <= False;
   endrule
 

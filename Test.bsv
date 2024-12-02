@@ -2,6 +2,9 @@ import Randomizable::*;
 import CoalTree::*;
 import MergeTree::*;
 import VectorMem::*;
+import Memory::*;
+import ClientServer::*;
+import GetPut::*;
 import Vector::*;
 
 typedef 32 VecWidth;
@@ -31,6 +34,7 @@ endmodule
 (* synthesize *)
 module mkTop(Empty);
   let cTree <- coalTree;
+  let m <- vectorMem;
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, TestData)) randomData <- mkGenericRandomizer;
@@ -62,6 +66,14 @@ module mkTop(Empty);
     if (inCount < threshold && any(id, inv) && doEnq) begin
       $display(fshow("Enq: ") + fshow(v));
       let e <- cTree.enq(v);
+      function Bit#(32) g(TestData x) = extend(pack(x));
+      let a = map(g, data);
+      m.request.put(VecMemoryRequest {
+        write: False,
+        addresses: a,
+        datas: a,
+        mask: inv
+      });
       inCount <= inCount + 1;
     end else if (inCount == threshold) begin
       let e <- cTree.enq(replicate(tagged Invalid)); // mark the end
@@ -80,5 +92,11 @@ module mkTop(Empty);
         cTree.deq;
       end
     endcase
+  endrule
+
+  (* fire_when_enabled *)
+  rule mem;
+    let mRes <- m.response.get;
+    $display(fshow("Deq: ") + fshow(mRes));
   endrule
 endmodule
