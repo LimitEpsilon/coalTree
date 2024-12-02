@@ -107,7 +107,7 @@ module mkDummyMemoryServer(MemoryServer#(a, d));
 
   interface Put request;
     method Action put(MemoryRequest#(a, d) req);
-      f.enq(req);
+      if (!req.write) f.enq(req);
     endmethod
   endinterface
 

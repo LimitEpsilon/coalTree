@@ -9,6 +9,7 @@ import Vector::*;
 
 typedef 32 VecWidth;
 typedef UInt#(1) TestData;
+typedef 8 MemWidth;
 
 function Ordering comp (TestData x, TestData y) = compare(pack(x), pack(y));
 
@@ -25,7 +26,7 @@ module mergeTree(MergeTree#(VecWidth, TestData));
 endmodule
 
 (* synthesize *)
-module vectorMem(VecMemoryServer#(VecWidth, 32, 32));
+module vectorMem(VecMemoryServer#(VecWidth, MemWidth, MemWidth));
   let dummy <- mkDummyMemoryServer;
   let ret <- mkVecMemoryServer(dummy);
   return ret;
@@ -63,17 +64,18 @@ module mkTop(Empty);
     let inv <- randomInv.next;
     let data <- randomData.next;
     let v = zipWith(f, inv, data);
+
+    function Bit#(MemWidth) g(TestData x) = extend(pack(x));
+    m.request.put(VecMemoryRequest {
+      write: !doEnq,
+      addresses: map(g, data),
+      datas: map(g, data),
+      mask: inv
+    });
+
     if (inCount < threshold && any(id, inv) && doEnq) begin
       $display(fshow("Enq: ") + fshow(v));
       let e <- cTree.enq(v);
-      function Bit#(32) g(TestData x) = extend(pack(x));
-      let a = map(g, data);
-      m.request.put(VecMemoryRequest {
-        write: False,
-        addresses: a,
-        datas: a,
-        mask: inv
-      });
       inCount <= inCount + 1;
     end else if (inCount == threshold) begin
       let e <- cTree.enq(replicate(tagged Invalid)); // mark the end
