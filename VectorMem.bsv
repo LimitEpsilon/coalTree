@@ -28,13 +28,8 @@ module mkVecMemoryServer(MemoryServer#(a, d) m, VecMemoryServer#(n, a, d) ifc)
   provisos (Add#(_, 1, TDiv#(d, 8)), Coalescer#(n, MemoryRequest#(a, d)));
   FIFOF#(Vector#(n, Bool)) outMasks <- mkFIFOF;
   FIFOF#(Vector#(n, Bool)) respMasks <- mkFIFOF;
-  Reg#(Vector#(n, Bool)) leftover <- mkReg(replicate(False));
-  Reg#(Bool) cleared[2] <- mkCReg(2, True);
-  Reg#(Vector#(n, Maybe#(Bit#(d)))) outBuf <- mkReg(replicate(tagged Invalid));
   CoalTree#(n, MemoryRequest#(a, d)) c <- mkCoalTree(comp);
-  FIFOF#(VecMemoryResponse#(n, d)) out <- mkFIFOF;
-
-  Bool isLeftover = any(id, leftover);
+  Vector#(n, FIFOF#(MemoryResponse#(d))) out <- replicateM(mkFIFOF);
 
   (* fire_when_enabled *)
   rule do_mem_req;
@@ -50,29 +45,13 @@ module mkVecMemoryServer(MemoryServer#(a, d) m, VecMemoryServer#(n, a, d) ifc)
   endrule
 
   (* fire_when_enabled *)
-  rule do_mem_resp(isLeftover);
+  rule do_mem_resp;
     let resp <- m.response.get;
     let respMask = respMasks.first;
-    function Maybe#(Bit#(d)) f(MemoryResponse#(d) l, Bool mask, Maybe#(Bit#(d)) r) =
-      mask ? tagged Valid l.data : r;
-    function Bool bneg(Bool b) = !b;
-    leftover <= zipWith(\&& , leftover, map(bneg, respMask));
-    outBuf <= zipWith(f(resp), respMask, outBuf);
+    for (Integer i = 0; i < valueOf(n); i = i + 1) begin
+      if (respMask[i]) out[i].enq(resp);
+    end
     respMasks.deq;
-  endrule
-
-  (* fire_when_enabled *)
-  rule enq_out(!isLeftover && !cleared[0]);
-    out.enq(VecMemoryResponse {datas: outBuf});
-    cleared[0] <= True;
-  endrule
-
-  (* fire_when_enabled *)
-  rule set_leftover(!isLeftover && cleared[1]);
-    leftover <= outMasks.first;
-    outBuf <= replicate(tagged Invalid);
-    outMasks.deq;
-    cleared[1] <= False;
   endrule
 
   interface Put request;
@@ -94,9 +73,16 @@ module mkVecMemoryServer(MemoryServer#(a, d) m, VecMemoryServer#(n, a, d) ifc)
 
   interface Get response;
     method ActionValue#(VecMemoryResponse#(n, d)) get;
-      let resp = out.first;
-      out.deq;
-      return resp;
+      let outMask = outMasks.first;
+      Vector#(n, Maybe#(Bit#(d))) ret = replicate(tagged Invalid);
+      for (Integer i = 0; i < valueOf(n); i = i + 1) begin
+        if (outMask[i]) begin
+          ret[i] = tagged Valid out[i].first.data;
+          out[i].deq;
+        end
+      end
+      outMasks.deq;
+      return VecMemoryResponse {datas: ret};
     endmethod
   endinterface
 endmodule
