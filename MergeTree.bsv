@@ -1,6 +1,7 @@
 // Adapted from https://github.com/mtikekar/advanced_bsv
 // https://github.com/B-Lang-org/bsc/blob/708607343d6e0ac31aa509eca1c918aaa4509ffb/testsuite/bsc.bsv_examples/xbar/XBar.bsv
 import FIFOF :: *;
+import SpecialFIFOs :: *;
 import Vector :: *;
 import GetPut :: *;
 
@@ -18,7 +19,7 @@ endtypeclass
 instance Merger#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
   module mkMergeTree_(MergeTree#(1, t));
-    FIFOF#(t) in <- mkGLFIFOF(False, True); // only enq is guarded
+    FIFOF#(t) in <- mkBypassFIFOF;
     Vector#(1, Put#(t)) i;
 
     i[0] =
@@ -45,7 +46,7 @@ instance Merger#(n, t) provisos (
     MergeTree#(hn, t) l <- mkMergeTree_;
     MergeTree#(hm, t) r <- mkMergeTree_;
     Reg#(Bool) lPrio <- mkReg (True); // the left tree has priority
-    FIFOF#(t) out <- mkGLFIFOF(False, True); // only enq is guarded
+    FIFOF#(t) out <- mkBypassFIFOF;
 
     (* fire_when_enabled *)
     rule arbitrate_both(l.notEmpty && r.notEmpty);
