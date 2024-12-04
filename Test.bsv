@@ -1,4 +1,5 @@
 import Randomizable::*;
+import ChoiceTree::*;
 import CoalTree::*;
 import MergeTree::*;
 import VectorMem::*;
@@ -75,6 +76,7 @@ module mkTop(Empty);
 
     if (inCount < threshold && any(id, inv) && doEnq) begin
       $display(fshow("Enq: ") + fshow(v));
+      $display(fshow("First valid index: ") + fshow(treeChoice(v)));
       let e <- cTree.enq(v);
       inCount <= inCount + 1;
     end else if (inCount == threshold) begin

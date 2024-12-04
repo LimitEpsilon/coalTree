@@ -26,7 +26,7 @@ endtypeclass
 instance Coalescer#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
   module mkCoalTree_(function Ordering comp(t x, t y), CoalTree#(1, t) ifc);
-    FIFOF#(EpochReq#(1, t)) in <- mkGFIFOF(False, True); // only enq is guarded
+    FIFOF#(EpochReq#(1, t)) in <- mkGLFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
     method ActionValue#(Bool) enq(Vector#(1, Maybe#(t)) v);
@@ -60,7 +60,7 @@ instance Coalescer#(n, t) provisos (
     // two subtrees
     CoalTree#(hn, t) l <- mkCoalTree_(comp);
     CoalTree#(hm, t) r <- mkCoalTree_(comp);
-    FIFOF#(EpochReq#(n, t)) out <- mkGFIFOF(False, True); // only enq is guarded
+    FIFOF#(EpochReq#(n, t)) out <- mkGLFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
     match {.reqL, .epochL} = l.first;
