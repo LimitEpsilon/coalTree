@@ -1,5 +1,4 @@
 // Adapted from https://github.com/mtikekar/advanced_bsv
-// https://github.com/B-Lang-org/bsc/blob/708607343d6e0ac31aa509eca1c918aaa4509ffb/testsuite/bsc.bsv_examples/xbar/XBar.bsv
 import FIFOF :: *;
 import SpecialFIFOs :: *;
 import Vector :: *;
@@ -22,7 +21,7 @@ endtypeclass
 instance Serializer#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
   module mkSerTree(SerTree#(1, t));
-    FIFOF#(Epoch#(t)) in <- mkGLFIFOF(False, True); // only enq is guarded
+    FIFOF#(Epoch#(t)) in <- mkBypassFIFOF;
     Reg#(Bool) epoch <- mkReg(False);
 
     method Action enq(Vector#(1, Maybe#(t)) v);
@@ -32,7 +31,7 @@ instance Serializer#(1, t) provisos (Bits#(t, tSz));
 
     method notEmpty = in.notEmpty;
 
-    method deq = in.deq; // must be called under if (notEmpty)
+    method deq = in.deq;
 
     method first = in.first;
   endmodule
@@ -49,7 +48,7 @@ instance Serializer#(n, t) provisos (
     // two subtrees
     SerTree#(hn, t) l <- mkSerTree;
     SerTree#(hm, t) r <- mkSerTree;
-    FIFOF#(Epoch#(t)) out <- mkGLFIFOF(False, True); // only enq is guarded
+    FIFOF#(Epoch#(t)) out <- mkBypassFIFOF;
     Reg#(Bool) epoch <- mkReg(False);
 
     let selL = l.first;
