@@ -109,15 +109,10 @@ endinterface
 
 module mkMergeTree(MergeTree#(n, t))
   provisos (Serializer#(n, t), Bits#(t, tSz));
-  function Ordering comp(t x, t y) = LT;
   (* hide *) Vector#(n, FIFOF#(t)) iports <- replicateM(mkBypassFIFOF);
   (* hide *) SerTree#(n, t) inner <- mkSerTree;
 
   function Bool isNotEmpty(FIFOF#(t) fifo) = fifo.notEmpty;
-  function Put#(t) toPut(FIFOF#(t) fifo) =
-    interface Put;
-      method put = fifo.enq;
-    endinterface;
 
   (* fire_when_enabled *)
   rule enq_inner(any(isNotEmpty, iports));
