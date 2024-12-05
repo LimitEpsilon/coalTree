@@ -20,12 +20,12 @@ interface CoalTree#(numeric type n, type t);
 endinterface
 
 typeclass Coalescer#(numeric type n, type t);
-  module mkCoalTree_(function Ordering comp(t x, t y), CoalTree#(n, t) ifc);
+  module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(n, t));
 endtypeclass
 
 instance Coalescer#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
-  module mkCoalTree_(function Ordering comp(t x, t y), CoalTree#(1, t) ifc);
+  module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(1, t));
     FIFOF#(EpochReq#(1, t)) in <- mkGLFIFOF(False, True); // only enq is guarded
     Reg#(Bool) epoch <- mkReg(False);
 
@@ -56,7 +56,7 @@ instance Coalescer#(n, t) provisos (
 );
 
   // General case
-  module mkCoalTree_(function Ordering comp(t x, t y), CoalTree#(n, t) ifc);
+  module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(n, t));
     // two subtrees
     CoalTree#(hn, t) l <- mkCoalTree_(comp);
     CoalTree#(hm, t) r <- mkCoalTree_(comp);
@@ -153,9 +153,8 @@ instance Coalescer#(n, t) provisos (
 endinstance
 
 // guard deq and first only at the interface
-module mkCoalTree(function Ordering comp (t x, t y), CoalTree#(n, t) ifc) provisos (
-  Coalescer#(n, t)
-);
+module mkCoalTree#(function Ordering comp (t x, t y)) (CoalTree#(n, t))
+  provisos (Coalescer#(n, t));
   (* hide *)
   CoalTree#(n, t) inner <- mkCoalTree_(comp);
   method enq = inner.enq;
