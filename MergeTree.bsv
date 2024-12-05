@@ -60,11 +60,11 @@ instance Serializer#(n, t) provisos (
     rule get_result_both(l.notEmpty && r.notEmpty);
       if (epochL == epochR) begin
         epoch <= epochL;
-        if (isValid(reqL)) begin
-          out.enq(selL); l.deq; r.deq;
-        end else begin
-          out.enq(selR); l.deq; r.deq;
-        end
+        case (tuple2(reqL, reqR)) matches
+          {tagged Valid .*, tagged Valid .*}: begin out.enq(selL); l.deq; end
+          {tagged Valid .*, .*}: begin out.enq(selL); l.deq; r.deq; end
+          default: begin out.enq(selR); l.deq; r.deq; end
+        endcase
       end else if (epochL == epoch) begin
         out.enq(selL); l.deq;
       end else begin // epochR == epoch
@@ -102,13 +102,13 @@ endinstance
 interface MergeTree#(numeric type n, type t);
   interface Vector#(n, Put#(t)) iport;
   method Action deq;
-  method t first;
+  method Maybe#(t) first;
   method Bool notEmpty;
 endinterface
 
 module mkMergeTree(MergeTree#(n, t))
   provisos (Serializer#(n, t), Bits#(t, tSz));
-  (* hide *) Vector#(n, FIFOF#(t)) iports <- replicateM(mkBypassFIFOF);
+  (* hide *) Vector#(n, FIFOF#(t)) iports <- replicateM(mkLFIFOF);
   (* hide *) SerTree#(n, t) inner <- mkSerTree;
 
   function Bool isNotEmpty(FIFOF#(t) fifo) = fifo.notEmpty;
@@ -126,7 +126,7 @@ module mkMergeTree(MergeTree#(n, t))
 
   interface iport = map(toPut, iports);
   method deq = inner.deq;
-  method first if (inner.notEmpty) = fromMaybe(?, tpl_1(inner.first));
+  method first if (inner.notEmpty) = tpl_1(inner.first);
   method notEmpty = inner.notEmpty;
 endmodule
 

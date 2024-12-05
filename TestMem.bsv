@@ -12,20 +12,6 @@ typedef 32 VecWidth;
 typedef UInt#(1) TestData;
 typedef 8 MemWidth;
 
-function Ordering comp (TestData x, TestData y) = compare(pack(x), pack(y));
-
-(* synthesize *)
-module coalTree(CoalTree#(VecWidth, TestData));
-  CoalTree#(VecWidth, TestData) c <- mkCoalTree(comp);
-  return c;
-endmodule
-
-(* synthesize *)
-module mergeTree(MergeTree#(VecWidth, TestData));
-  MergeTree#(VecWidth, TestData) m <- mkMergeTree;
-  return m;
-endmodule
-
 (* synthesize *)
 module vectorMem(VecMemoryServer#(VecWidth, MemWidth, MemWidth));
   let dummy <- mkDummyMemoryServer;
@@ -34,8 +20,7 @@ module vectorMem(VecMemoryServer#(VecWidth, MemWidth, MemWidth));
 endmodule
 
 (* synthesize *)
-module mkTop(Empty);
-  let cTree <- coalTree;
+module mkTopMem(Empty);
   let m <- vectorMem;
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
@@ -43,6 +28,7 @@ module mkTop(Empty);
   Reg#(UInt#(32)) inCount <- mkReg(0);
   Reg#(UInt#(32)) cycle <- mkReg(0);
   UInt#(32) threshold = 32;
+  Reg#(Bool) finish <- mkReg(False);
 
   (* fire_when_enabled *)
   (* execution_order = "put, increment" *)
@@ -77,30 +63,16 @@ module mkTop(Empty);
     if (inCount < threshold && any(id, inv) && doEnq) begin
       $display(fshow("Enq: ") + fshow(v));
       $display(fshow("First valid index: ") + fshow(treeChoice(v)));
-      let e <- cTree.enq(v);
       inCount <= inCount + 1;
     end else if (inCount == threshold) begin
-      let e <- cTree.enq(replicate(tagged Invalid)); // mark the end
+      finish <= True;
     end
   endrule
 
   (* fire_when_enabled *)
   rule test;
-    let notEmpty = cTree.notEmpty;
-    let res = notEmpty ? tpl_1(cTree.first) : tagged Invalid;
-    case (res) matches
-      tagged Invalid:
-        if (notEmpty && inCount == threshold) $finish;
-      tagged Valid .x: begin
-        $display(fshow("Deq: ") + fshow(x));
-        cTree.deq;
-      end
-    endcase
-  endrule
-
-  (* fire_when_enabled *)
-  rule mem;
     let mRes <- m.response.get;
     $display(fshow("Deq: ") + fshow(mRes));
+    if (finish) $finish;
   endrule
 endmodule
