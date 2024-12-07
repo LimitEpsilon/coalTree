@@ -1,11 +1,6 @@
 import Randomizable::*;
-import ChoiceTree::*;
-import CoalTree::*;
 import MergeTree::*;
-import VectorMem::*;
-import Memory::*;
-import ClientServer::*;
-import GetPut::*;
+import FIFOF::*;
 import Vector::*;
 
 typedef 32 VecWidth;
@@ -14,13 +9,14 @@ typedef 8 MemWidth;
 
 (* synthesize *)
 module mergeTree(MergeTree#(VecWidth, TestData));
-  MergeTree#(VecWidth, TestData) m <- mkMergeTree;
+  let m <- mkMergeTree;
   return m;
 endmodule
 
 (* synthesize *)
 module mkTopMerge(Empty);
   let mTree <- mergeTree;
+  Vector#(VecWidth, FIFOF#(TestData)) datas <- replicateM(mkLFIFOF);
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, TestData)) randomData <- mkGenericRandomizer;
@@ -54,10 +50,9 @@ module mkTopMerge(Empty);
 
     if (inCount < threshold && any(id, inv) && doEnq) begin
       for (Integer i = 0; i < valueOf(VecWidth); i = i + 1) begin
-        if (!inv[i]) mTree.iport[i].put(data[i]);
+        if (!inv[i]) datas[i].enq(data[i]);
       end
       $display(fshow("Enq: ") + fshow(v));
-      $display(fshow("First valid index: ") + fshow(treeChoice(v)));
       inCount <= inCount + 1;
     end else if (inCount == threshold) begin
       finish.wset(?);
@@ -65,9 +60,29 @@ module mkTopMerge(Empty);
   endrule
 
   (* fire_when_enabled *)
+  rule do_assert;
+    for (Integer i = 0; i < valueOf(VecWidth); i = i + 1) begin
+      if (datas[i].notEmpty) begin
+        let data = datas[i].first;
+        mTree.iport[i].asrt(data);
+      end
+    end
+  endrule
+
+  (* fire_when_enabled *)
+  rule do_deq;
+    for (Integer i = 0; i < valueOf(VecWidth); i = i + 1) begin
+      if (datas[i].notEmpty && mTree.iport[i].selected) datas[i].deq;
+    end
+  endrule
+
+  (* fire_when_enabled *)
+  (* no_implicit_conditions *)
   rule test;
     let x = mTree.first;
-    mTree.deq;
-    $display(fshow("Deq: ") + fshow(x));
+    if (x matches tagged Valid .y) begin
+      mTree.select;
+      $display(fshow("Deq: ") + fshow(y));
+    end
   endrule
 endmodule

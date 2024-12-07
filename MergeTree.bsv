@@ -1,132 +1,100 @@
 // Adapted from https://github.com/mtikekar/advanced_bsv
-import FIFOF :: *;
-import SpecialFIFOs :: *;
 import Vector :: *;
-import GetPut :: *;
 
-typedef Tuple2#(Maybe#(t), Bool) Epoch#(type t);
-
-// Serializer, specialized version of CoalTrees
-interface SerTree#(numeric type n, type t);
-  method Action enq(Vector#(n, Maybe#(t)) v);
-  method Bool notEmpty;
-  method Action deq;
-  method Epoch#(t) first;
+interface Assert#(type t);
+  method Action asrt(t x);
+  method Bool selected;
 endinterface
 
-typeclass Serializer#(numeric type n, type t);
-  module mkSerTree(SerTree#(n, t));
+interface MergeTree#(numeric type n, type t);
+  interface Vector#(n, Assert#(t)) iport;
+  method Action select;
+  method Maybe#(t) first;
+endinterface
+
+typeclass Merger#(numeric type n, type t);
+  module mkMergeTree(MergeTree#(n, t));
 endtypeclass
 
-instance Serializer#(1, t) provisos (Bits#(t, tSz));
+instance Merger#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
-  module mkSerTree(SerTree#(1, t));
-    FIFOF#(Epoch#(t)) in <- mkBypassFIFOF;
-    Reg#(Bool) epoch <- mkReg(False);
+  module mkMergeTree(MergeTree#(1, t));
+    RWire#(t) in <- mkRWire;
+    RWire#(void) sel <- mkRWire;
+    Vector#(1, Assert#(t)) i;
 
-    method Action enq(Vector#(1, Maybe#(t)) v);
-      in.enq(tuple2(v[0], epoch));
-      epoch <= !epoch;
-    endmethod
+    i[0] =
+      (interface Assert;
+        method asrt = in.wset;
+        method selected = isValid(sel.wget);
+      endinterface);
 
-    method notEmpty = in.notEmpty;
-
-    method deq = in.deq;
-
-    method first = in.first;
+    interface iport = i;
+    method select = sel.wset(?);
+    method first = in.wget;
   endmodule
 endinstance
 
-instance Serializer#(n, t) provisos (
+instance Merger#(n, t) provisos (
   Div#(n, 2, hn), Add#(hn, hm, n),
-  Serializer#(hn, t), Serializer#(hm, t),
+  Merger#(hn, t), Merger#(hm, t),
   Bits#(t, tSz)
 );
 
   // General case
-  module mkSerTree (SerTree#(n, t));
+  module mkMergeTree(MergeTree#(n, t));
     // two subtrees
-    SerTree#(hn, t) l <- mkSerTree;
-    SerTree#(hm, t) r <- mkSerTree;
-    FIFOF#(Epoch#(t)) out <- mkBypassFIFOF;
-    Reg#(Bool) epoch <- mkReg(False);
+    MergeTree#(hn, t) l <- mkMergeTree;
+    MergeTree#(hm, t) r <- mkMergeTree;
+    Reg#(Bool) prio <- mkReg(True); // the left tree has priority
+    RWire#(t) out <- mkRWire;
+    RWire#(void) sel <- mkRWire;
 
-    let selL = l.first;
-    let selR = r.first;
-    match {.reqL, .epochL} = selL;
-    match {.reqR, .epochR} = selR;
+    let lSel = l.first;
+    let rSel = r.first;
 
     (* fire_when_enabled *)
-    rule get_result_both(l.notEmpty && r.notEmpty);
-      if (epochL == epochR) begin
-        epoch <= epochL;
-        case (tuple2(reqL, reqR)) matches
-          {tagged Valid .*, tagged Valid .*}: begin out.enq(selL); l.deq; end
-          {tagged Valid .*, .*}: begin out.enq(selL); l.deq; r.deq; end
-          default: begin out.enq(selR); l.deq; r.deq; end
-        endcase
-      end else if (epochL == epoch) begin
-        out.enq(selL); l.deq;
-      end else begin // epochR == epoch
-        out.enq(selR); r.deq;
-      end
+    (* no_implicit_conditions *)
+    rule arbitrate_both(isValid(lSel) && isValid(rSel));
+      if (prio) out.wset(fromMaybe(?, lSel));
+      else out.wset(fromMaybe(?, rSel));
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_left(l.notEmpty && !r.notEmpty);
-      epoch <= epochL;
-      out.enq(selL);
-      l.deq;
+    (* no_implicit_conditions *)
+    rule arbitrate_left(isValid(lSel) && !isValid(rSel));
+      out.wset(fromMaybe(?, lSel));
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_right(!l.notEmpty && r.notEmpty);
-      epoch <= epochR;
-      out.enq(selR);
-      r.deq;
+    (* no_implicit_conditions *)
+    rule arbitrate_right(!isValid(lSel) && isValid(rSel));
+      out.wset(fromMaybe(?, rSel));
     endrule
 
-    method Action enq(Vector#(n, Maybe#(t)) v);
-      l.enq(take(v));
-      r.enq(takeTail(v));
-    endmethod
+    (* fire_when_enabled *)
+    (* no_implicit_conditions *)
+    rule update_prio(isValid(sel.wget));
+      case (tuple2(lSel, rSel)) matches
+        {tagged Valid .*, tagged Valid .*}: begin
+          if (prio) l.select; else r.select;
+          prio <= !prio;
+        end
+        {tagged Valid .*, tagged Invalid}: begin
+          l.select;
+          prio <= False;
+        end
+        {tagged Invalid, tagged Valid .*}: begin
+          r.select;
+          prio <= True;
+        end
+        {tagged Invalid, tagged Invalid}: noAction;
+      endcase
+    endrule
 
-    method notEmpty = out.notEmpty;
-
-    method deq = out.deq; // must be called under if (notEmpty)
-
-    method first = out.first;
+    interface iport = append(l.iport, r.iport);
+    method select = sel.wset(?);
+    method first = out.wget;
   endmodule
 endinstance
-
-interface MergeTree#(numeric type n, type t);
-  interface Vector#(n, Put#(t)) iport;
-  method Action deq;
-  method Maybe#(t) first;
-  method Bool notEmpty;
-endinterface
-
-module mkMergeTree(MergeTree#(n, t))
-  provisos (Serializer#(n, t), Bits#(t, tSz));
-  (* hide *) Vector#(n, FIFOF#(t)) iports <- replicateM(mkLFIFOF);
-  (* hide *) SerTree#(n, t) inner <- mkSerTree;
-
-  function Bool isNotEmpty(FIFOF#(t) fifo) = fifo.notEmpty;
-
-  (* fire_when_enabled *)
-  rule enq_inner(any(isNotEmpty, iports));
-    Vector#(n, Maybe#(t)) v = replicate(tagged Invalid);
-    for (Integer i = 0; i < valueOf(n); i = i + 1)
-      if (iports[i].notEmpty) begin
-        v[i] = tagged Valid iports[i].first;
-        iports[i].deq;
-      end
-    inner.enq(v);
-  endrule
-
-  interface iport = map(toPut, iports);
-  method deq = inner.deq;
-  method first if (inner.notEmpty) = tpl_1(inner.first);
-  method notEmpty = inner.notEmpty;
-endmodule
 
