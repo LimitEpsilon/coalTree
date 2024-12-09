@@ -4,7 +4,7 @@ import FIFOF::*;
 import Vector::*;
 
 typedef 32 VecWidth;
-typedef UInt#(1) TestData;
+typedef UInt#(4) TestData;
 typedef 8 MemWidth;
 
 (* synthesize *)
@@ -13,9 +13,15 @@ module mergeTree(MergeTree#(VecWidth, TestData));
   return m;
 endmodule
 
+(* noinline *)
+function Tuple2#(Maybe#(Bit#(TLog#(VecWidth))), Vector#(sn, Bool))
+  arb(Vector#(VecWidth, Maybe#(TestData)) in, Vector#(sn, Bool) prio)
+  provisos (Add#(1, sn, VecWidth)) = treeArb(in, prio);
+
 (* synthesize *)
 module mkTopMerge(Empty);
-  let mTree <- mergeTree;
+  Reg#(Vector#(TSub#(VecWidth, 1), Bool)) prios <- mkReg(replicate(True));
+  Vector#(VecWidth, RWire#(TestData)) in <- replicateM(mkRWire);
   Vector#(VecWidth, FIFOF#(TestData)) datas <- replicateM(mkLFIFOF);
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
@@ -25,9 +31,13 @@ module mkTopMerge(Empty);
   UInt#(32) threshold = 1;
   RWire#(void) finish <- mkRWire;
 
+  Vector#(VecWidth, Maybe#(TestData)) asserted;
+  for (Integer i = 0; i < valueOf(VecWidth); i = i + 1) begin
+    asserted[i] = in[i].wget;
+  end
+  match {.selected, .nprio} = arb(asserted, prios);
+
   (* fire_when_enabled *)
-  (* execution_order = "put, increment" *)
-  (* execution_order = "test, increment" *)
   rule increment;
     if (cycle == 0) begin
       randomEnq.cntrl.init;
@@ -59,30 +69,19 @@ module mkTopMerge(Empty);
     end
   endrule
 
-  (* fire_when_enabled *)
-  rule do_assert;
-    for (Integer i = 0; i < valueOf(VecWidth); i = i + 1) begin
-      if (datas[i].notEmpty) begin
-        let data = datas[i].first;
-        mTree.iport[i].asrt(data);
-      end
-    end
-  endrule
+  for (Integer i = 0; i < valueOf(VecWidth); i = i + 1) begin
+    (* fire_when_enabled *)
+    rule do_assert;
+      in[i].wset(datas[i].first);
+    endrule
+  end
 
   (* fire_when_enabled *)
   rule do_deq;
-    for (Integer i = 0; i < valueOf(VecWidth); i = i + 1) begin
-      if (datas[i].notEmpty && mTree.iport[i].selected) datas[i].deq;
+    if (selected matches tagged Valid .idx) begin
+      $display(fshow("Deq: ") + fshow(datas[idx].first));
+      datas[idx].deq;
     end
-  endrule
-
-  (* fire_when_enabled *)
-  (* no_implicit_conditions *)
-  rule test;
-    let x = mTree.first;
-    if (x matches tagged Valid .y) begin
-      mTree.select;
-      $display(fshow("Deq: ") + fshow(y));
-    end
+    prios <= nprio;
   endrule
 endmodule

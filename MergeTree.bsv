@@ -2,7 +2,7 @@
 import Vector :: *;
 
 interface Assert#(type t);
-  method Action asrt(t x);
+  method Action hold(t x);
   method Bool selected;
 endinterface
 
@@ -25,7 +25,7 @@ instance Merger#(1, t) provisos (Bits#(t, tSz));
 
     i[0] =
       (interface Assert;
-        method asrt = in.wset;
+        method hold = in.wset;
         method selected = isValid(sel.wget);
       endinterface);
 
@@ -96,5 +96,65 @@ instance Merger#(n, t) provisos (
     method select = sel.wset(?);
     method first = out.wget;
   endmodule
+endinstance
+
+typeclass Arbiter#(numeric type n, type t);
+  // given: (vector of inputs to be arbitrated, current priority vector)
+  // returns: (index that was selected, next priority vector)
+  function Tuple2#(Maybe#(Bit#(TLog#(n))), Vector#(TSub#(n, 1), Bool))
+    treeArb(Vector#(n, Maybe#(t)) in, Vector#(TSub#(n, 1), Bool) prio);
+endtypeclass
+
+instance Arbiter#(1, t) provisos (Bits#(t, tSz));
+  // Base instance of 1-long vector
+  function Tuple2#(Maybe#(Bit#(0)), Vector#(0, Bool))
+    treeArb(Vector#(1, Maybe#(t)) in, Vector#(0, Bool) prio) =
+    tuple2(isValid(in[0]) ? tagged Valid 0'b0 : tagged Invalid, prio);
+endinstance
+
+instance Arbiter#(n, t) provisos (
+  Mul#(hn, 2, n), Add#(hn, hn, n), Add#(2, a__, n),
+  Add#(1, TAdd#(hn, b__), n), Add#(1, TLog#(hn), TLog#(n)),
+  Arbiter#(hn, t), Bits#(t, tSz)
+);
+
+  // General case
+  function Tuple2#(Maybe#(Bit#(TLog#(n))), Vector#(TSub#(n, 1), Bool))
+    treeArb(Vector#(n, Maybe#(t)) in, Vector#(TSub#(n, 1), Bool) prio);
+    Vector#(hn, Maybe#(t)) inL = take(in);
+    Vector#(hn, Maybe#(t)) inR = takeTail(in);
+    Vector#(1, Bool) thisPrio = take(prio);
+    Vector#(TSub#(n, 2), Bool) subPrio = takeTail(prio);
+    Vector#(TSub#(hn, 1), Bool) prioL = take(subPrio);
+    Vector#(TSub#(hn, 1), Bool) prioR = takeTail(subPrio);
+
+    match {.idxL, .nprioL} = treeArb(inL, prioL);
+    match {.idxR, .nprioR} = treeArb(inR, prioR);
+
+    Maybe#(Bit#(TLog#(n))) ret = tagged Invalid;
+
+    if (idxL matches tagged Valid .iL) begin
+      if (idxR matches tagged Valid .iR) begin
+        thisPrio[0] = !thisPrio[0];
+        if (prio[0]) begin
+          ret = tagged Valid ({0, iL});
+          prioL = nprioL;
+        end else begin
+          ret = tagged Valid ({1, iR});
+          prioR = nprioR;
+        end
+      end else begin
+        thisPrio[0] = False;
+        ret = tagged Valid ({0, iL});
+        prioL = nprioL;
+      end
+    end else if (idxR matches tagged Valid .iR) begin
+      thisPrio[0] = True;
+      ret = tagged Valid ({1, iR});
+      prioR = nprioR;
+    end
+
+    return tuple2(ret, append(thisPrio, append(prioL, prioR)));
+  endfunction
 endinstance
 
