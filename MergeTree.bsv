@@ -98,31 +98,30 @@ instance Merger#(n, t) provisos (
   endmodule
 endinstance
 
-typeclass Arbiter#(numeric type n, type t);
+typeclass Arbiter#(numeric type n);
   // given: (vector of inputs to be arbitrated, current priority vector)
   // returns: (index that was selected, next priority vector)
   function Tuple2#(Maybe#(Bit#(TLog#(n))), Vector#(TSub#(n, 1), Bool))
-    treeArb(Vector#(n, Maybe#(t)) in, Vector#(TSub#(n, 1), Bool) prio);
+    treeArb(Vector#(n, Maybe#(void)) in, Vector#(TSub#(n, 1), Bool) prio);
 endtypeclass
 
-instance Arbiter#(1, t) provisos (Bits#(t, tSz));
+instance Arbiter#(1);
   // Base instance of 1-long vector
   function Tuple2#(Maybe#(Bit#(0)), Vector#(0, Bool))
-    treeArb(Vector#(1, Maybe#(t)) in, Vector#(0, Bool) prio) =
+    treeArb(Vector#(1, Maybe#(void)) in, Vector#(0, Bool) prio) =
     tuple2(isValid(in[0]) ? tagged Valid 0'b0 : tagged Invalid, prio);
 endinstance
 
-instance Arbiter#(n, t) provisos (
-  Mul#(hn, 2, n), Add#(hn, hn, n), Add#(2, a__, n),
-  Add#(1, TAdd#(hn, b__), n), Add#(1, TLog#(hn), TLog#(n)),
-  Arbiter#(hn, t), Bits#(t, tSz)
+instance Arbiter#(n) provisos (
+  Mul#(hn, 2, n), Add#(hn, hn, n), Add#(1, TLog#(hn), TLog#(n)),
+  Add#(1, TAdd#(hn, b__), n), Add#(2, a__, n), Arbiter#(hn)
 );
 
   // General case
   function Tuple2#(Maybe#(Bit#(TLog#(n))), Vector#(TSub#(n, 1), Bool))
-    treeArb(Vector#(n, Maybe#(t)) in, Vector#(TSub#(n, 1), Bool) prio);
-    Vector#(hn, Maybe#(t)) inL = take(in);
-    Vector#(hn, Maybe#(t)) inR = takeTail(in);
+    treeArb(Vector#(n, Maybe#(void)) in, Vector#(TSub#(n, 1), Bool) prio);
+    Vector#(hn, Maybe#(void)) inL = take(in);
+    Vector#(hn, Maybe#(void)) inR = takeTail(in);
     Vector#(1, Bool) thisPrio = take(prio);
     Vector#(TSub#(n, 2), Bool) subPrio = takeTail(prio);
     Vector#(TSub#(hn, 1), Bool) prioL = take(subPrio);

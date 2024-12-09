@@ -15,13 +15,13 @@ endmodule
 
 (* noinline *)
 function Tuple2#(Maybe#(Bit#(TLog#(VecWidth))), Vector#(sn, Bool))
-  arb(Vector#(VecWidth, Maybe#(TestData)) in, Vector#(sn, Bool) prio)
+  arb(Vector#(VecWidth, Maybe#(void)) in, Vector#(sn, Bool) prio)
   provisos (Add#(1, sn, VecWidth)) = treeArb(in, prio);
 
 (* synthesize *)
 module mkTopMerge(Empty);
   Reg#(Vector#(TSub#(VecWidth, 1), Bool)) prios <- mkReg(replicate(True));
-  Vector#(VecWidth, RWire#(TestData)) in <- replicateM(mkRWire);
+  Vector#(VecWidth, RWire#(void)) in <- replicateM(mkRWire);
   Vector#(VecWidth, FIFOF#(TestData)) datas <- replicateM(mkLFIFOF);
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
@@ -31,7 +31,7 @@ module mkTopMerge(Empty);
   UInt#(32) threshold = 1;
   RWire#(void) finish <- mkRWire;
 
-  Vector#(VecWidth, Maybe#(TestData)) asserted;
+  Vector#(VecWidth, Maybe#(void)) asserted;
   for (Integer i = 0; i < valueOf(VecWidth); i = i + 1) begin
     asserted[i] = in[i].wget;
   end
@@ -72,7 +72,7 @@ module mkTopMerge(Empty);
   for (Integer i = 0; i < valueOf(VecWidth); i = i + 1) begin
     (* fire_when_enabled *)
     rule do_assert;
-      in[i].wset(datas[i].first);
+      if (datas[i].notEmpty) in[i].wset(?);
     endrule
   end
 
