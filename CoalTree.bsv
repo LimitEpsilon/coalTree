@@ -31,9 +31,9 @@ instance Coalescer#(1, t) provisos (Bits#(t, tSz));
 
     method ActionValue#(Bool) enq(Vector#(1, Maybe#(t)) v);
       let req = CoalReq {mask: pack(isValid(v[0])), req: fromMaybe(?, v[0])};
-      let e = epoch;
+      let e = !epoch;
       in.enq(tuple2(req, e));
-      epoch <= !e;
+      epoch <= e;
       return e;
     endmethod
 
@@ -57,7 +57,7 @@ instance Coalescer#(n, t) provisos (
     CoalTree#(hn, t) l <- mkCoalTree_(comp);
     CoalTree#(hm, t) r <- mkCoalTree_(comp);
     FIFOF#(EpochReq#(n, t)) out <- mkGLFIFOF(False, True); // only enq is guarded
-    Reg#(Bool) epoch <- mkReg(True);
+    Reg#(Bool) epoch <- mkReg(False);
 
     match {.reqL, .epochL} = l.first;
     match {.reqR, .epochR} = r.first;
