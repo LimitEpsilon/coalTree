@@ -1,5 +1,4 @@
 import Randomizable::*;
-import ChoiceTree::*;
 import CoalTree::*;
 import MergeTree::*;
 import VectorMem::*;
@@ -8,8 +7,8 @@ import ClientServer::*;
 import GetPut::*;
 import Vector::*;
 
-typedef 32 VecWidth;
-typedef UInt#(1) TestData;
+typedef 17 VecWidth;
+typedef UInt#(2) TestData;
 typedef 8 MemWidth;
 
 function Ordering comp (TestData x, TestData y) = compare(pack(x), pack(y));
@@ -54,7 +53,6 @@ module mkTopCoal(Empty);
 
     if (inCount < threshold && any(id, inv) && doEnq) begin
       $display(fshow("Enq: ") + fshow(v));
-      $display(fshow("First valid index: ") + fshow(treeChoice(v)));
       let e <- cTree.enq(v);
       inCount <= inCount + 1;
     end else if (inCount == threshold) begin
@@ -63,16 +61,13 @@ module mkTopCoal(Empty);
   endrule
 
   (* fire_when_enabled *)
-  rule test;
-    let notEmpty = cTree.notEmpty;
-    let res = notEmpty ? tpl_1(cTree.first) : tagged Invalid;
-    case (res) matches
-      tagged Invalid:
-        if (notEmpty && inCount == threshold) $finish;
-      tagged Valid .x: begin
-        $display(fshow("Deq: ") + fshow(x));
-        cTree.deq;
-      end
-    endcase
+  rule test(cTree.notEmpty);
+    let res = tpl_1(cTree.first);
+    if (res.mask == 0) begin
+      if (inCount == threshold) $finish;
+    end else begin
+      $display("Deq: mask: %b, req: %d", res.mask, res.req);
+      cTree.deq;
+    end
   endrule
 endmodule

@@ -34,11 +34,15 @@ module mkVecMemoryServer(MemoryServer#(a, d) m, VecMemoryServer#(n, a, d) ifc)
   (* fire_when_enabled *)
   rule do_mem_req;
     match {.req, .*} = c.first;
-    case (req) matches
-      tagged Invalid: noAction;
-      tagged Valid .r: begin
-        m.request.put(r.req);
-        if (!r.req.write) respMasks.enq(r.mask);
+    case (pack(req.mask) == 0) matches
+      True: noAction;
+      False: begin
+        m.request.put(req.req);
+        Vector#(n, Bool) v = newVector;
+        for (Integer i = 0; i < valueOf(n); i = i + 1) begin
+          v[i] = unpack(req.mask[i]);
+        end
+        if (!req.req.write) respMasks.enq(v);
       end
     endcase
     c.deq;

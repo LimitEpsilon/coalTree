@@ -21,6 +21,7 @@ function Tuple2#(Maybe#(Bit#(TLog#(VecWidth))), Vector#(sn, Bool))
 (* synthesize *)
 module mkTopMerge(Empty);
   Reg#(Vector#(TSub#(VecWidth, 1), Bool)) prios <- mkReg(replicate(True));
+  // for proofs, this can be replaced with CRegs
   Vector#(VecWidth, RWire#(void)) in <- replicateM(mkRWire);
   Vector#(VecWidth, FIFOF#(TestData)) datas <- replicateM(mkLFIFOF);
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
