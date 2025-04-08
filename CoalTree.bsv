@@ -1,6 +1,5 @@
 // Adapted from https://github.com/mtikekar/advanced_bsv
 import Vector::*;
-import FIFOF::*;
 
 // coalesced request
 typedef struct {
@@ -26,22 +25,23 @@ endtypeclass
 instance Coalescer#(1, t) provisos (Bits#(t, tSz));
   // Base instance of 1-long vector
   module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(1, t));
-    FIFOF#(EpochReq#(1, t)) in <- mkGLFIFOF(False, True); // only enq is guarded
+    Reg#(CoalReq#(1, t)) in <- mkReg(CoalReq {mask: 0, req: unpack(0)});
+    Reg#(Bool) empty[2] <- mkCReg(2, True);
     Reg#(Bool) epoch <- mkReg(False);
 
-    method ActionValue#(Bool) enq(Vector#(1, Maybe#(t)) v);
+    method ActionValue#(Bool) enq(Vector#(1, Maybe#(t)) v) if (empty[1]);
       let req = CoalReq {mask: pack(isValid(v[0])), req: fromMaybe(?, v[0])};
       let e = !epoch;
-      in.enq(tuple2(req, e));
+      in <= req; empty[1] <= False;
       epoch <= e;
       return e;
     endmethod
 
-    method notEmpty = in.notEmpty;
+    method notEmpty = !empty[0];
 
-    method deq = in.deq; // must be called under if (notEmpty)
+    method Action deq; empty[0] <= True; endmethod // must be called under if (notEmpty)
 
-    method first = in.first;
+    method first = tuple2(in, epoch);
   endmodule
 endinstance
 
@@ -56,75 +56,68 @@ instance Coalescer#(n, t) provisos (
     // two subtrees
     CoalTree#(hn, t) l <- mkCoalTree_(comp);
     CoalTree#(hm, t) r <- mkCoalTree_(comp);
-    FIFOF#(EpochReq#(n, t)) out <- mkGLFIFOF(True, True); // unguarded
+    Reg#(CoalReq#(n, t)) out <- mkReg(CoalReq {mask: 0, req: unpack(0)});
+    Reg#(Bool) empty[2] <- mkCReg(2, True);
     Reg#(Bool) epoch <- mkReg(False);
 
     match {.reqL, .epochL} = l.first;
     match {.reqR, .epochR} = r.first;
 
-    EpochReq#(n, t) selL = begin
-      let req = CoalReq {
-        mask: {0, reqL.mask},
-        req: reqL.req
-      };
-      tuple2(req, epochL);
-    end; // select left
+    CoalReq#(n, t) selL = CoalReq {
+      mask: {0, reqL.mask},
+      req: reqL.req
+    }; // select left
 
-    EpochReq#(n, t) selR = begin
-      let req = CoalReq {
-        mask: {reqR.mask, 0},
-        req: reqR.req
-      };
-      tuple2(req, epochR);
-    end; // select right
+    CoalReq#(n, t) selR = CoalReq {
+      mask: {reqR.mask, 0},
+      req: reqR.req
+    }; // select right
 
-    EpochReq#(n, t) selB = begin
-      let req = CoalReq {
-        mask: {reqR.mask, reqL.mask},
-        req: reqL.req
-      };
-      tuple2(req, epochL);
-    end; // select both
+    CoalReq#(n, t) selB = CoalReq {
+      mask: {reqR.mask, reqL.mask},
+      req: reqL.req
+    }; // select both
 
     Bool empL = reqL.mask == 0;
     Bool empR = reqR.mask == 0;
 
     (* fire_when_enabled *)
-    rule get_result_both(l.notEmpty && r.notEmpty && out.notFull);
+    rule get_result_both(l.notEmpty && r.notEmpty && empty[1]);
       if (epochL == epochR) begin // update epoch
         epoch <= epochL;
+        empty[1] <= False;
         case (tuple2(empL, empR)) matches
           {False, False}: begin
             let dir = comp(reqL.req, reqR.req);
             let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
-            out.enq(sel);
+            out <= sel;
             if (dir != GT) l.deq;
             if (dir != LT) r.deq;
           end
-          {False, True}: begin out.enq(selL); l.deq; r.deq; end
-          default: begin out.enq(selR); l.deq; r.deq; end
+          {False, True}: begin out <= selL; l.deq; r.deq; end
+          default: begin out <= selR; l.deq; r.deq; end
         endcase
       end else if (epochL == epoch) begin
-        if (!empL) out.enq(selL);
+        if (!empL) begin out <= selL; empty[1] <= False; end
         l.deq;
       end else begin // epochR == epoch
-        if (!empR) out.enq(selR);
+        if (!empR) begin out <= selR; empty[1] <= False; end
         r.deq;
       end
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_left(l.notEmpty && !r.notEmpty && out.notFull);
+    rule get_result_left(l.notEmpty && !r.notEmpty && empty[1]);
       if (epoch == epochL && !empL) begin
-        out.enq(selL);
+        out <= selL; empty[1] <= False;
         l.deq;
       end // else, wait until the right subtree catches up
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_right(!l.notEmpty && r.notEmpty && out.notFull);
+    rule get_result_right(!l.notEmpty && r.notEmpty && empty[1]);
       if (epoch == epochR && !empR) begin
-        out.enq(selR);
+        out <= selR; empty[1] <= False;
         r.deq;
       end // else, wait until the left subtree catches up
     endrule
@@ -135,11 +128,11 @@ instance Coalescer#(n, t) provisos (
       return eL;
     endmethod
 
-    method notEmpty = out.notEmpty;
+    method notEmpty = !empty[0];
 
-    method deq = out.deq; // must be called under if (notEmpty)
+    method Action deq; empty[0] <= True; endmethod // must be called under if (notEmpty)
 
-    method first = out.first;
+    method first = tuple2(out, epoch);
   endmodule
 endinstance
 

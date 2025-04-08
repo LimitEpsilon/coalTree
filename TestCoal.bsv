@@ -7,7 +7,7 @@ import ClientServer::*;
 import GetPut::*;
 import Vector::*;
 
-typedef 14 VecWidth;
+typedef 23 VecWidth;
 typedef UInt#(2) TestData;
 typedef 8 MemWidth;
 
