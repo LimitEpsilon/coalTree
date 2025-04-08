@@ -56,7 +56,7 @@ instance Coalescer#(n, t) provisos (
     // two subtrees
     CoalTree#(hn, t) l <- mkCoalTree_(comp);
     CoalTree#(hm, t) r <- mkCoalTree_(comp);
-    FIFOF#(EpochReq#(n, t)) out <- mkGLFIFOF(False, True); // only enq is guarded
+    FIFOF#(EpochReq#(n, t)) out <- mkGLFIFOF(True, True); // unguarded
     Reg#(Bool) epoch <- mkReg(False);
 
     match {.reqL, .epochL} = l.first;
@@ -90,7 +90,7 @@ instance Coalescer#(n, t) provisos (
     Bool empR = reqR.mask == 0;
 
     (* fire_when_enabled *)
-    rule get_result_both(l.notEmpty && r.notEmpty);
+    rule get_result_both(l.notEmpty && r.notEmpty && out.notFull);
       if (epochL == epochR) begin // update epoch
         epoch <= epochL;
         case (tuple2(empL, empR)) matches
@@ -105,23 +105,25 @@ instance Coalescer#(n, t) provisos (
           default: begin out.enq(selR); l.deq; r.deq; end
         endcase
       end else if (epochL == epoch) begin
-        out.enq(selL); l.deq;
+        if (!empL) out.enq(selL);
+        l.deq;
       end else begin // epochR == epoch
-        out.enq(selR); r.deq;
+        if (!empR) out.enq(selR);
+        r.deq;
       end
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_left(l.notEmpty && !r.notEmpty);
-      if (epoch == epochL) begin
+    rule get_result_left(l.notEmpty && !r.notEmpty && out.notFull);
+      if (epoch == epochL && !empL) begin
         out.enq(selL);
         l.deq;
       end // else, wait until the right subtree catches up
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_right(!l.notEmpty && r.notEmpty);
-      if (epoch == epochR) begin
+    rule get_result_right(!l.notEmpty && r.notEmpty && out.notFull);
+      if (epoch == epochR && !empR) begin
         out.enq(selR);
         r.deq;
       end // else, wait until the left subtree catches up
