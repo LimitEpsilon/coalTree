@@ -5,7 +5,13 @@ import Vector::*;
 typedef struct {
   Bit#(n) mask;
   t req;
-} CoalReq#(numeric type n, type t) deriving (Bits, Eq, FShow);
+} CoalReq#(numeric type n, type t) deriving (Bits, Eq);
+
+instance FShow#(CoalReq#(n, t)) provisos (FShow#(t));
+  function Fmt fshow(CoalReq#(n, t) x);
+    return $format("{mask: %b, req: ", x.mask) + fshow(x.req) + fshow("}");
+  endfunction
+endinstance
 
 interface CoalTree#(numeric type n, type t);
   method Action enq(Vector#(n, Maybe#(t)) v); // returns the epoch
@@ -19,7 +25,7 @@ typeclass Coalescer#(numeric type n, type t);
   module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(n, t));
 endtypeclass
 
-instance Coalescer#(1, t) provisos (Bits#(t, tSz));
+instance Coalescer#(1, t) provisos (Bits#(t, tSz), FShow#(t));
   // Base instance of 1-long vector
   module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(1, t));
     Reg#(CoalReq#(1, t)) in <- mkReg(CoalReq {mask: 0, req: unpack(0)});
@@ -47,7 +53,7 @@ endinstance
 instance Coalescer#(n, t) provisos (
   Div#(n, 2, hn), Add#(hn, hm, n),
   Coalescer#(hn, t), Coalescer#(hm, t),
-  Bits#(t, tSz)
+  Bits#(t, tSz), FShow#(t)
 );
 
   // General case
@@ -82,21 +88,18 @@ instance Coalescer#(n, t) provisos (
 
     (* fire_when_enabled *)
     rule get_result_both(l.notEmpty && r.notEmpty && empty[1]);
-      Bool empL = reqL.mask == 0;
-      Bool empR = reqR.mask == 0;
+      // $display(fshow("get_result_both, ") + fshow(reqL) + fshow(reqR) + $format("epochL: %b, epochR: %b", epochL, epochR));
       if (epochL == epochR) begin // update epoch
         epoch <= epochL;
-        case (tuple2(empL, empR)) matches
-          {False, False}: begin
-            let dir = comp(reqL.req, reqR.req);
-            let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
-            out <= sel;
-            if (dir != GT) l.deq;
-            if (dir != LT) r.deq;
-          end
-          {False, True}: begin out <= selL; l.deq; r.deq; end
-          default: begin out <= selR; l.deq; r.deq; end
-        endcase
+        if (reqL.mask != 0 && reqR.mask != 0) begin
+          let dir = comp(reqL.req, reqR.req);
+          let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
+          out <= sel;
+          if (dir != GT) l.deq;
+          if (dir != LT) r.deq;
+        end else begin
+          out <= selB; l.deq; r.deq;
+        end
       end else if (epochL == epoch) begin // reqL cannot be empty
         out <= selL;
         l.deq;
@@ -109,6 +112,7 @@ instance Coalescer#(n, t) provisos (
 
     (* fire_when_enabled *)
     rule get_result_left(l.notEmpty && !r.notEmpty && empty[1]);
+      // $display(fshow("get_result_left, ") + fshow(reqL) + $format("epochL: %b, epochR: %b", epochL, epochR));
       if (epoch == epochL && epoch != epochR) begin
         out <= selL;
         empty[1] <= False;
@@ -118,6 +122,7 @@ instance Coalescer#(n, t) provisos (
 
     (* fire_when_enabled *)
     rule get_result_right(!l.notEmpty && r.notEmpty && empty[1]);
+      // $display(fshow("get_result_right, ") + fshow(reqR) + $format("epochL: %b, epochR: %b", epochL, epochR));
       if (epoch == epochR && epoch != epochL) begin
         out <= selR;
         empty[1] <= False;

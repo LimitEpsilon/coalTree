@@ -63,11 +63,8 @@ module mkTopCoal(Empty);
   (* fire_when_enabled *)
   rule test(cTree.notEmpty);
     let res = cTree.first;
-    if (res.mask == 0) begin
-      if (inCount == threshold) $finish;
-    end else begin
-      $display("Deq: mask: %b, req: %d", res.mask, res.req);
-      cTree.deq;
-    end
+    $display("Deq: mask: %b, req: %d", res.mask, res.req);
+    if (res.mask == 0 && inCount == threshold) $finish;
+    cTree.deq;
   endrule
 endmodule
