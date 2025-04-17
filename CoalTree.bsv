@@ -85,6 +85,8 @@ instance Coalescer#(n, t) provisos (
       req: reqL.req
     }; // select both
 
+    let dir = comp(reqL.req, reqR.req);
+    let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
 
     (* fire_when_enabled *)
     rule get_result_both(l.notEmpty && r.notEmpty && empty[1]);
@@ -92,8 +94,6 @@ instance Coalescer#(n, t) provisos (
       if (epochL == epochR) begin // update epoch
         epoch <= epochL;
         if (reqL.mask != 0 && reqR.mask != 0) begin
-          let dir = comp(reqL.req, reqR.req);
-          let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
           out <= sel;
           if (dir != GT) l.deq;
           if (dir != LT) r.deq;
@@ -111,23 +111,21 @@ instance Coalescer#(n, t) provisos (
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_left(l.notEmpty && !r.notEmpty && empty[1]);
+    rule get_result_left(l.notEmpty && !r.notEmpty && empty[1] && epoch == epochL && epoch != epochR);
       // $display(fshow("get_result_left, ") + fshow(reqL) + $format("epochL: %b, epochR: %b", epochL, epochR));
-      if (epoch == epochL && epoch != epochR) begin
-        out <= selL;
-        empty[1] <= False;
-        l.deq;
-      end // else, wait until the right subtree catches up
+      out <= selL;
+      l.deq;
+      empty[1] <= False;
+      // else, wait until the right subtree catches up
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_right(!l.notEmpty && r.notEmpty && empty[1]);
+    rule get_result_right(!l.notEmpty && r.notEmpty && empty[1] && epoch == epochR && epoch != epochL);
       // $display(fshow("get_result_right, ") + fshow(reqR) + $format("epochL: %b, epochR: %b", epochL, epochR));
-      if (epoch == epochR && epoch != epochL) begin
-        out <= selR;
-        empty[1] <= False;
-        r.deq;
-      end // else, wait until the left subtree catches up
+      out <= selR;
+      r.deq;
+      empty[1] <= False;
+      // else, wait until the left subtree catches up
     endrule
 
     method Action enq(Vector#(n, Maybe#(t)) v);
