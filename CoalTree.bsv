@@ -27,19 +27,20 @@ instance Coalescer#(1, t) provisos (Bits#(t, tSz));
   module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(1, t));
     Reg#(CoalReq#(1, t)) in <- mkReg(CoalReq {mask: 0, req: unpack(0)});
     Reg#(Bool) empty[2] <- mkCReg(2, True);
-    Reg#(Bool) epoch <- mkReg(False);
+    Reg#(Bool) epoch <- mkReg(True);
 
     method ActionValue#(Bool) enq(Vector#(1, Maybe#(t)) v) if (empty[1]);
       let req = CoalReq {mask: pack(isValid(v[0])), req: fromMaybe(?, v[0])};
-      let e = !epoch;
       in <= req; empty[1] <= False;
-      epoch <= e;
-      return e;
+      return epoch;
     endmethod
 
     method notEmpty = !empty[0];
 
-    method Action deq; empty[0] <= True; endmethod // must be called under if (notEmpty)
+    method Action deq;
+      empty[0] <= True;
+      epoch <= !epoch;
+    endmethod // must be called under if (notEmpty)
 
     method first = tuple2(in, epoch);
   endmodule
