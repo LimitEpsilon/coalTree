@@ -7,15 +7,12 @@ typedef struct {
   t req;
 } CoalReq#(numeric type n, type t) deriving (Bits, Eq, FShow);
 
-typedef
-  Tuple2#(CoalReq#(n, t), Bool)
-  EpochReq#(numeric type n, type t);
-
 interface CoalTree#(numeric type n, type t);
-  method ActionValue#(Bool) enq(Vector#(n, Maybe#(t)) v); // returns the epoch
+  method Action enq(Vector#(n, Maybe#(t)) v); // returns the epoch
   method Bool notEmpty;
+  method Bool getEpoch;
   method Action deq;
-  method EpochReq#(n, t) first;
+  method CoalReq#(n, t) first;
 endinterface
 
 typeclass Coalescer#(numeric type n, type t);
@@ -29,20 +26,21 @@ instance Coalescer#(1, t) provisos (Bits#(t, tSz));
     Reg#(Bool) empty[2] <- mkCReg(2, True);
     Reg#(Bool) epoch <- mkReg(True);
 
-    method ActionValue#(Bool) enq(Vector#(1, Maybe#(t)) v) if (empty[1]);
-      let req = CoalReq {mask: pack(isValid(v[0])), req: fromMaybe(?, v[0])};
-      in <= req; empty[1] <= False;
-      return epoch;
+    method Action enq(Vector#(1, Maybe#(t)) v) if (empty[1]);
+      in <= CoalReq {mask: pack(isValid(v[0])), req: fromMaybe(?, v[0])};
+      empty[1] <= False;
     endmethod
 
     method notEmpty = !empty[0];
+
+    method getEpoch = epoch;
 
     method Action deq;
       empty[0] <= True;
       epoch <= !epoch;
     endmethod // must be called under if (notEmpty)
 
-    method first = tuple2(in, epoch);
+    method first = in;
   endmodule
 endinstance
 
@@ -61,8 +59,10 @@ instance Coalescer#(n, t) provisos (
     Reg#(Bool) empty[2] <- mkCReg(2, True);
     Reg#(Bool) epoch <- mkReg(False);
 
-    match {.reqL, .epochL} = l.first;
-    match {.reqR, .epochR} = r.first;
+    let epochL = l.getEpoch;
+    let epochR = r.getEpoch;
+    let reqL = l.first;
+    let reqR = r.first;
 
     CoalReq#(n, t) selL = CoalReq {
       mask: {0, reqL.mask},
@@ -79,14 +79,13 @@ instance Coalescer#(n, t) provisos (
       req: reqL.req
     }; // select both
 
-    Bool empL = reqL.mask == 0;
-    Bool empR = reqR.mask == 0;
 
     (* fire_when_enabled *)
     rule get_result_both(l.notEmpty && r.notEmpty && empty[1]);
+      Bool empL = reqL.mask == 0;
+      Bool empR = reqR.mask == 0;
       if (epochL == epochR) begin // update epoch
         epoch <= epochL;
-        empty[1] <= False;
         case (tuple2(empL, empR)) matches
           {False, False}: begin
             let dir = comp(reqL.req, reqR.req);
@@ -98,42 +97,46 @@ instance Coalescer#(n, t) provisos (
           {False, True}: begin out <= selL; l.deq; r.deq; end
           default: begin out <= selR; l.deq; r.deq; end
         endcase
-      end else if (epochL == epoch) begin
-        if (!empL) begin out <= selL; empty[1] <= False; end
+      end else if (epochL == epoch) begin // reqL cannot be empty
+        out <= selL;
         l.deq;
       end else begin // epochR == epoch
-        if (!empR) begin out <= selR; empty[1] <= False; end
+        out <= selR;
         r.deq;
       end
+      empty[1] <= False;
     endrule
 
     (* fire_when_enabled *)
     rule get_result_left(l.notEmpty && !r.notEmpty && empty[1]);
-      if (epoch == epochL && !empL) begin
-        out <= selL; empty[1] <= False;
+      if (epoch == epochL && epoch != epochR) begin
+        out <= selL;
+        empty[1] <= False;
         l.deq;
       end // else, wait until the right subtree catches up
     endrule
 
     (* fire_when_enabled *)
     rule get_result_right(!l.notEmpty && r.notEmpty && empty[1]);
-      if (epoch == epochR && !empR) begin
-        out <= selR; empty[1] <= False;
+      if (epoch == epochR && epoch != epochL) begin
+        out <= selR;
+        empty[1] <= False;
         r.deq;
       end // else, wait until the left subtree catches up
     endrule
 
-    method ActionValue#(Bool) enq(Vector#(n, Maybe#(t)) v);
-      let eL <- l.enq(take(v));
-      let eR <- r.enq(takeTail(v));
-      return eL;
+    method Action enq(Vector#(n, Maybe#(t)) v);
+      l.enq(take(v));
+      r.enq(takeTail(v));
     endmethod
 
     method notEmpty = !empty[0];
 
+    method getEpoch = (empty[0] && epoch != epochL) ? epochR : epoch;
+
     method Action deq; empty[0] <= True; endmethod // must be called under if (notEmpty)
 
-    method first = tuple2(out, epoch);
+    method first = out;
   endmodule
 endinstance
 
@@ -144,6 +147,7 @@ module mkCoalTree#(function Ordering comp (t x, t y)) (CoalTree#(n, t))
   CoalTree#(n, t) inner <- mkCoalTree_(comp);
   method enq = inner.enq;
   method notEmpty = inner.notEmpty;
+  method getEpoch = inner.getEpoch;
   method deq if (inner.notEmpty) = inner.deq;
   method first if (inner.notEmpty) = inner.first;
 endmodule

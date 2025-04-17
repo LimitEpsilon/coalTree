@@ -62,7 +62,7 @@ module mkTopCoal(Empty);
 
   (* fire_when_enabled *)
   rule test(cTree.notEmpty);
-    let res = tpl_1(cTree.first);
+    let res = cTree.first;
     if (res.mask == 0) begin
       if (inCount == threshold) $finish;
     end else begin

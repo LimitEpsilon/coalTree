@@ -33,7 +33,7 @@ module mkVecMemoryServer(MemoryServer#(a, d) m, VecMemoryServer#(n, a, d) ifc)
 
   (* fire_when_enabled *)
   rule do_mem_req;
-    match {.req, .*} = c.first;
+    let req = c.first;
     case (pack(req.mask) == 0) matches
       True: noAction;
       False: begin
