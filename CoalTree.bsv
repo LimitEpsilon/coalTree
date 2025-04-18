@@ -98,7 +98,8 @@ instance Coalescer#(n, t) provisos (
           if (dir != GT) l.deq;
           if (dir != LT) r.deq;
         end else begin
-          out <= selB; l.deq; r.deq;
+          out <= reqL.mask == 0 ? selR : selL;
+          l.deq; r.deq;
         end
       end else if (epochL == epoch) begin // reqL cannot be empty
         out <= selL;
