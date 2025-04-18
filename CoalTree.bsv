@@ -111,7 +111,8 @@ instance Coalescer#(n, t) provisos (
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_left(l.notEmpty && !r.notEmpty && empty[1] && epoch == epochL && epoch != epochR);
+    rule get_result_left(l.notEmpty && !r.notEmpty && empty[1] && epoch == epochL);
+      // && epoch != epochR);
       // $display(fshow("get_result_left, ") + fshow(reqL) + $format("epochL: %b, epochR: %b", epochL, epochR));
       out <= selL;
       l.deq;
@@ -120,7 +121,8 @@ instance Coalescer#(n, t) provisos (
     endrule
 
     (* fire_when_enabled *)
-    rule get_result_right(!l.notEmpty && r.notEmpty && empty[1] && epoch == epochR && epoch != epochL);
+    rule get_result_right(!l.notEmpty && r.notEmpty && empty[1] && epoch == epochR);
+      // && epoch != epochL);
       // $display(fshow("get_result_right, ") + fshow(reqR) + $format("epochL: %b, epochR: %b", epochL, epochR));
       out <= selR;
       r.deq;
@@ -135,7 +137,8 @@ instance Coalescer#(n, t) provisos (
 
     method notEmpty = !empty[0];
 
-    method getEpoch = (empty[0] && epoch != epochL) ? epochR : epoch;
+    // method getEpoch = (empty[0] && epoch != epochL) ? epochR : epoch;
+    method getEpoch = epoch;
 
     method Action deq; empty[0] <= True; endmethod // must be called under if (notEmpty)
 

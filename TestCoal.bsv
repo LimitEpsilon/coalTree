@@ -7,7 +7,7 @@ import ClientServer::*;
 import GetPut::*;
 import Vector::*;
 
-typedef 23 VecWidth;
+typedef 17 VecWidth;
 typedef UInt#(2) TestData;
 typedef 8 MemWidth;
 
@@ -63,7 +63,7 @@ module mkTopCoal(Empty);
   (* fire_when_enabled *)
   rule test(cTree.notEmpty);
     let res = cTree.first;
-    $display("Deq: mask: %b, req: %d", res.mask, res.req);
+    $display(fshow("Deq: ") + fshow(res));
     if (res.mask == 0 && inCount == threshold) $finish;
     cTree.deq;
   endrule
