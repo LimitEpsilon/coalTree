@@ -10,51 +10,57 @@ interface Stack#(numeric type n, type t);
 endinterface
 
 module mkStack#(Bool guardPush, Bool guardPop) (Stack#(n, t)) provisos (Bits#(t, tSz));
-  // n is size of stack
+  // n is size of stack, should be at least 1
   // t is data type of stack
-  Vector#(n, Reg#(t))            data      <- replicateM(mkRegU);
-  RWire#(void)                   popReq    <- mkRWire;
-  RWire#(void)                   pushReq   <- mkRWire;
-  RWire#(void)                   clearReq  <- mkRWire;
-  Reg#(Bit#(TLog#(TAdd#(n, 1)))) size      <- mkReg(0);
-  Bit#(TLog#(TAdd#(n, 1)))       max_index = fromInteger(valueOf(n));
+  Vector#(n, Reg#(t))  data      <- replicateM(mkRegU);
+  RWire#(void)         popReq    <- mkRWire;
+  RWire#(void)         pushReq   <- mkRWire;
+  RWire#(void)         clearReq  <- mkRWire;
+  Reg#(Bool)           empty     <- mkReg(True);
+  Reg#(Bool)           full      <- mkReg(False);
+  Reg#(Bit#(TLog#(n))) size      <- mkReg(0); // points to the next empty slot
+  Bit#(TLog#(n))       max_index = fromInteger(valueOf(n)-1);
 
   let pushSize = size + 1;
   let popSize = size - 1;
 
-  Bool isEmpty = size == 0;
-  Bool isFull = !isValid(popReq.wget) && size == max_index;
-
   (* fire_when_enabled, no_implicit_conditions *)
   rule canonicalize;
-    if (isValid(clearReq.wget))
+    if (isValid(clearReq.wget)) begin
+      empty <= True;
+      full <= False;
       size <= 0;
-    else if (isValid(popReq.wget))
-      size <= isValid(pushReq.wget) ? size : popSize;
-    else if (isValid(pushReq.wget))
+    end else if (isValid(popReq.wget) && !isValid(pushReq.wget)) begin
+      empty <= size == 1;
+      full <= False;
+      size <= popSize;
+    end else if (!isValid(popReq.wget) && isValid(pushReq.wget)) begin
+      empty <= False;
+      full <= size == max_index;
       size <= pushSize;
+    end
   endrule
 
-  method Bool notFull = !isFull;
+  method Bool notFull = isValid(popReq.wget) || !full;
 
-  method Action push(t x) if (!guardPush || !isFull);
-    let size_ = isValid(popReq.wget) ? popSize : size;
-    data[size_] <= x;
+  method Action push(t x) if (!guardPush || isValid(popReq.wget) || !full);
+    let topP = isValid(popReq.wget) ? popSize : size;
+    data[topP] <= x;
     pushReq.wset(?);
     for (Integer i = 0; i < valueOf(n); i = i + 1) begin
-      if (fromInteger(i) < size_) $display("%0d: %x", i, pack(data[i]));
+      if (fromInteger(i) < topP) $display("%0d: %x", i, pack(data[i]));
     end
     $display("pushed %x", pack(x));
   endmethod
 
-  method Bool notEmpty = !isEmpty;
+  method Bool notEmpty = !empty;
 
-  method Action pop if (!guardPop || !isEmpty);
+  method Action pop if (!guardPop || !empty);
     $display("popped %x", pack(data[popSize]));
     popReq.wset(?);
   endmethod
 
-  method t top if (!guardPop || !isEmpty);
+  method t top if (!guardPop || !empty);
     return data[popSize];
   endmethod
 
