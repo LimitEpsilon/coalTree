@@ -19,10 +19,8 @@ module mkStack#(Bool guardPush, Bool guardPop) (Stack#(n, t)) provisos (Bits#(t,
   Reg#(Bool)           empty     <- mkReg(True);
   Reg#(Bool)           full      <- mkReg(False);
   Reg#(Bit#(TLog#(n))) size      <- mkReg(0); // points to the next empty slot
+  Reg#(Bit#(TLog#(n))) popSize   <- mkReg(-1);
   Bit#(TLog#(n))       max_index = fromInteger(valueOf(n)-1);
-
-  let pushSize = size + 1;
-  let popSize = size - 1;
 
   (* fire_when_enabled, no_implicit_conditions *)
   rule canonicalize;
@@ -30,14 +28,17 @@ module mkStack#(Bool guardPush, Bool guardPop) (Stack#(n, t)) provisos (Bits#(t,
       empty <= True;
       full <= False;
       size <= 0;
+      popSize <= -1;
     end else if (isValid(popReq.wget) && !isValid(pushReq.wget)) begin
       empty <= size == 1;
       full <= False;
       size <= popSize;
+      popSize <= popSize - 1;
     end else if (!isValid(popReq.wget) && isValid(pushReq.wget)) begin
       empty <= False;
       full <= size == max_index;
-      size <= pushSize;
+      size <= size + 1;
+      popSize <= popSize + 1;
     end
   endrule
 
