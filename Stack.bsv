@@ -13,35 +13,53 @@ module mkStack#(Bool guardPush, Bool guardPop) (Stack#(n, t)) provisos (Bits#(t,
   // n is size of stack
   // t is data type of stack
   Vector#(n, Reg#(t))            data      <- replicateM(mkRegU);
-  Reg#(Bit#(TLog#(TAdd#(n, 1)))) size[3]   <- mkCReg(3, 0);
+  RWire#(void)                   popReq    <- mkRWire;
+  RWire#(void)                   pushReq   <- mkRWire;
+  RWire#(void)                   clearReq  <- mkRWire;
+  Reg#(Bit#(TLog#(TAdd#(n, 1)))) size      <- mkReg(0);
   Bit#(TLog#(TAdd#(n, 1)))       max_index = fromInteger(valueOf(n));
 
-  Bool isEmpty = size[0] == 0;
-  Bool isFull = size[1] == max_index;
+  let pushSize = size + 1;
+  let popSize = size - 1;
+
+  Bool isEmpty = size == 0;
+  Bool isFull = !isValid(popReq.wget) && size == max_index;
+
+  (* fire_when_enabled, no_implicit_conditions *)
+  rule canonicalize;
+    if (isValid(clearReq.wget))
+      size <= 0;
+    else if (isValid(popReq.wget))
+      size <= isValid(pushReq.wget) ? size : popSize;
+    else if (isValid(pushReq.wget))
+      size <= pushSize;
+  endrule
 
   method Bool notFull = !isFull;
 
   method Action push(t x) if (!guardPush || !isFull);
+    let size_ = isValid(popReq.wget) ? popSize : size;
+    data[size_] <= x;
+    pushReq.wset(?);
     for (Integer i = 0; i < valueOf(n); i = i + 1) begin
-      if (fromInteger(i) < size[1]) $display("%0d: %x", i, pack(data[i]));
+      if (fromInteger(i) < size_) $display("%0d: %x", i, pack(data[i]));
     end
     $display("pushed %x", pack(x));
-    data[size[1]] <= x;
-    size[1] <= size[1] + 1;
   endmethod
 
   method Bool notEmpty = !isEmpty;
 
   method Action pop if (!guardPop || !isEmpty);
-    size[0] <= size[0] - 1;
+    $display("popped %x", pack(data[popSize]));
+    popReq.wset(?);
   endmethod
 
   method t top if (!guardPop || !isEmpty);
-    return data[size[0]];
+    return data[popSize];
   endmethod
 
   method Action clear;
-    size[2] <= 0;
+    clearReq.wset(?);
   endmethod
 endmodule
 
