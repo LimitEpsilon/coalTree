@@ -27,17 +27,17 @@ typedef
 MemoryPayload#(numeric type w, numeric type d);
 
 // preprocess memory requests
-function MemoryPayload#(w, d) mkMemoryPayload
+function MemoryPayload#(w, subd) mkMemoryPayload
   (Bit#(d) byteen, Bit#(w) offset, Vector#(d, Byte) data)
-  provisos (Add#(1, _, d));
+  provisos (Add#(1, subd, d), Add#(1, subw, TExp#(w)), Add#(subw, d, TAdd#(TExp#(w), subd)));
 
   let shamt = {1'b0, offset};
-  Integer wd = valueOf(TLog#(TAdd#(TExp#(w), d))); // = 1 + valueOf(w) if 0 < d ≤ 2ʷ
+  Integer wd = valueOf(TLog#(TAdd#(TExp#(w), subd))); // = 1 + valueOf(w) if 0 < d ≤ 2ʷ
 
-  function Maybe#(t) toMaybe(Bool v, t x) = v ? tagged Valid x : tagged Invalid;
-  Vector#(d, Maybe#(Byte)) odata = zipWith(toMaybe, unpack(byteen), data);
-  Vector#(TAdd#(TExp#(w), d), Maybe#(Byte)) datas =
-    rotateBy(append(odata, unpack(0)), unpack(shamt[wd-1 : 0]));
+  function Maybe#(t) mask(Bool v, t x) = v ? tagged Valid x : tagged Invalid;
+  Vector#(d, Maybe#(Byte)) odata = zipWith(mask, unpack(byteen), data);
+  Vector#(TAdd#(TExp#(w), subd), Maybe#(Byte)) extended = append(odata, unpack(0));
+  Vector#(TAdd#(TExp#(w), subd), Maybe#(Byte)) datas = rotateBy(extended, unpack(shamt[wd-1 : 0]));
 
   return datas;
 endfunction
@@ -54,15 +54,16 @@ typedef Server#(VecMemoryRequest#(n, a, d), VecMemoryResponse#(n, d))
 // Currently, we assume d = 4 (32 bit word), w = 6 (512 bit DRAM interface)
 module mkVecMemoryServer#(MemoryServer#(h, w8) m) (VecMemoryServer#(n, a, d) ifc)
   provisos (
-    Add#(1, _, d), Add#(d, __, TExp#(w)), Add#(h, w, a),
-    Mul#(TExp#(w), 8, w8), Div#(w8, 8, TExp#(w)),
-    Coalescer#(n, h, MemoryPayload#(w, d))
+    Add#(1, subd, d), Add#(1, subw, TExp#(w)), Add#(subw, d, TAdd#(TExp#(w), subd)),
+    Add#(d, _, TExp#(w)), Add#(subd, TAdd#(1, _), TExp#(w)),
+    Add#(h, w, a), Mul#(TExp#(w), 8, w8), Div#(w8, 8, TExp#(w)),
+    Coalescer#(n, h, MemoryPayload#(w, subd))
   );
 
   function Maybe#(t) merge(Maybe#(t) x, Maybe#(t) y) = isValid(x) ? x : y;
 
   // CoalReq → CoalResp → MemoryRequest → MemoryResponse → enq to out
-  CoalTree#(n, h, MemoryPayload#(w, d)) c <- mkCoalTree(zipWith(merge));
+  CoalTree#(n, h, MemoryPayload#(w, subd)) c <- mkCoalTree(zipWith(merge));
   // final destination
   Vector#(n, FIFOF#(Vector#(d, Byte))) out <- replicateM(mkLFIFOF);
   Fifo#(2, Bit#(n)) outMasks <- mkPipelineFifo(True, True);
@@ -105,9 +106,9 @@ module mkVecMemoryServer#(MemoryServer#(h, w8) m) (VecMemoryServer#(n, a, d) ifc
       Vector#(TExp#(w), Bool) alignedByteen = take(byteen);
       Vector#(TExp#(w), Byte) alignedData = take(datas);
 
-      Vector#(d, Bool) unalignedByteen_ = takeTail(byteen);
+      Vector#(subd, Bool) unalignedByteen_ = takeTail(byteen);
       Vector#(TExp#(w), Bool) unalignedByteen = append(unalignedByteen_, replicate(False));
-      Vector#(d, Byte) unalignedData_ = takeTail(datas);
+      Vector#(subd, Byte) unalignedData_ = takeTail(datas);
       Vector#(TExp#(w), Byte) unalignedData = append(unalignedData_, replicate(0));
 
       Bool unaligned = any(id, unalignedByteen_);
@@ -148,14 +149,14 @@ module mkVecMemoryServer#(MemoryServer#(h, w8) m) (VecMemoryServer#(n, a, d) ifc
 
     Vector#(TExp#(w), Byte) respData = unpack(resp.data);
     Vector#(TExp#(w), Byte) alignedData = needWait ? waitResp : respData;
-    Vector#(d, Byte) unalignedData = take(respData);
+    Vector#(subd, Byte) unalignedData = take(respData);
     let data = append(alignedData, unalignedData);
 
-    Integer wd = valueOf(TLog#(TAdd#(TExp#(w), d))); // = 1 + valueOf(w) if 0 < d ≤ 2ʷ
+    Integer wd = valueOf(TLog#(TAdd#(TExp#(w), subd))); // = 1 + valueOf(w) if 0 < d ≤ 2ʷ
 
     function Vector#(d, Byte) genOut(Integer i);
       let offsetBit = {1'b0, offsets[i].first};
-      UInt#(TLog#(TAdd#(TExp#(w), d))) offset = unpack(offsetBit[wd-1 : 0]);
+      UInt#(TLog#(TAdd#(TExp#(w), subd))) offset = unpack(offsetBit[wd-1 : 0]);
       return take(reverse(rotateBy(reverse(data), offset))); // rotate left
     endfunction
 
@@ -184,17 +185,17 @@ module mkVecMemoryServer#(MemoryServer#(h, w8) m) (VecMemoryServer#(n, a, d) ifc
         mask: .mask
       } = vReq;
 
-      function Maybe#(KV#(h, MemoryPayload#(w, d))) genReq(Integer i);
+      function Maybe#(KV#(h, MemoryPayload#(w, subd))) genReq(Integer i);
         Bit#(w) offset = truncate(addresses[i]);
         Vector#(d, Byte) data = unpack(datas[i]);
-        KV#(h, MemoryPayload#(w, d)) kv = KV {
+        KV#(h, MemoryPayload#(w, subd)) kv = KV {
           key: truncateLSB(addresses[i]),
           val: mkMemoryPayload(byteen, offset, data)
         };
         return mask[i] == 1 ? tagged Valid kv : tagged Invalid;
       endfunction
 
-      CoalReq#(n, h, MemoryPayload#(w, d)) cReq = genWith(genReq);
+      CoalReq#(n, h, MemoryPayload#(w, subd)) cReq = genWith(genReq);
 
       c.enq(cReq);
       writes.enq(write);
@@ -209,7 +210,6 @@ module mkVecMemoryServer#(MemoryServer#(h, w8) m) (VecMemoryServer#(n, a, d) ifc
   interface Get response;
     method ActionValue#(VecMemoryResponse#(n, d)) get;
       let outMask = outMasks.first;
-      function Byte doMask(Bool v, Byte b) = v ? b : 0;
       Vector#(n, Bit#(TMul#(d, 8))) ret = replicate(0);
       for (Integer i = 0; i < valueOf(n); i = i + 1)
         if (outMask[i] == 1) begin
