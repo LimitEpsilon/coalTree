@@ -11,11 +11,11 @@ typedef 17 VecWidth;
 typedef UInt#(2) TestData;
 typedef 8 MemWidth;
 
-function Ordering comp (TestData x, TestData y) = compare(pack(x), pack(y));
+function void merge (void x, void y) = x;
 
 (* synthesize *)
-module coalTree(CoalTree#(VecWidth, TestData));
-  CoalTree#(VecWidth, TestData) c <- mkCoalTree(comp);
+module coalTree(CoalTree#(VecWidth, 2, void));
+  CoalTree#(VecWidth, 2, void) c <- mkCoalTree(merge);
   return c;
 endmodule
 
@@ -44,8 +44,8 @@ module mkTopCoal(Empty);
 
   (* fire_when_enabled *)
   rule put;
-    function Maybe#(TestData) f(Bool inv, TestData data) =
-      inv ? tagged Invalid : tagged Valid data;
+    function Maybe#(KV#(2, void)) f(Bool inv, TestData data) =
+      inv ? tagged Invalid : tagged Valid KV {key: pack(data), val: ?};
     let doEnq <- randomEnq.next;
     let inv <- randomInv.next;
     let data <- randomData.next;

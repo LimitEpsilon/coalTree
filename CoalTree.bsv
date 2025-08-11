@@ -1,39 +1,48 @@
 // Adapted from https://github.com/mtikekar/advanced_bsv
 import Vector::*;
 
-// coalesced request
+typedef struct {
+  Bit#(k) key;
+  t val;
+} KV#(numeric type k, type t) deriving (Bits, Eq, FShow);
+
+// coalescing request
+typedef Vector#(n, Maybe#(KV#(k, t)))
+  CoalReq#(numeric type n, numeric type k, type t);
+
+// coalesced response
 typedef struct {
   Bit#(n) mask;
-  t req;
-} CoalReq#(numeric type n, type t) deriving (Bits, Eq);
+  KV#(k, t) kv;
+} CoalResp#(numeric type n, numeric type k, type t) deriving (Bits, Eq);
 
-instance FShow#(CoalReq#(n, t)) provisos (FShow#(t));
-  function Fmt fshow(CoalReq#(n, t) x);
-    return $format("{mask: %b, req: ", x.mask) + fshow(x.req) + fshow("}");
+instance FShow#(CoalResp#(n, k, t)) provisos (FShow#(t));
+  function Fmt fshow(CoalResp#(n, k, t) x);
+    return $format("{mask: %0b, key: %0h, val: ", x.mask, x.kv.key) + fshow(x.kv.val) + fshow("}");
   endfunction
 endinstance
 
-interface CoalTree#(numeric type n, type t);
-  method Action enq(Vector#(n, Maybe#(t)) v); // returns the epoch
+interface CoalTree#(numeric type n, numeric type k, type t);
+  method Action enq(CoalReq#(n, k, t) v);
   method Bool notEmpty;
   method Bool getEpoch;
   method Action deq;
-  method CoalReq#(n, t) first;
+  method CoalResp#(n, k, t) first;
 endinterface
 
-typeclass Coalescer#(numeric type n, type t);
-  module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(n, t));
+typeclass Coalescer#(numeric type n, numeric type k, type t);
+  module mkCoalTree_#(function t merge(t x, t y)) (CoalTree#(n, k, t));
 endtypeclass
 
-instance Coalescer#(1, t) provisos (Bits#(t, tSz), FShow#(t));
+instance Coalescer#(1, k, t) provisos (Bits#(t, tSz), FShow#(t));
   // Base instance of 1-long vector
-  module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(1, t));
-    Reg#(CoalReq#(1, t)) in <- mkReg(CoalReq {mask: 0, req: unpack(0)});
+  module mkCoalTree_#(function t merge(t x, t y)) (CoalTree#(1, k, t));
+    Reg#(CoalResp#(1, k, t)) in <- mkReg(CoalResp {mask: 0, kv: unpack(0)});
     Reg#(Bool) empty[2] <- mkCReg(2, True);
     Reg#(Bool) epoch <- mkReg(True);
 
-    method Action enq(Vector#(1, Maybe#(t)) v) if (empty[1]);
-      in <= CoalReq {mask: pack(isValid(v[0])), req: fromMaybe(?, v[0])};
+    method Action enq(CoalReq#(1, k, t) v) if (empty[1]);
+      in <= CoalResp {mask: pack(isValid(v[0])), kv: fromMaybe(?, v[0])};
       empty[1] <= False;
     endmethod
 
@@ -50,42 +59,42 @@ instance Coalescer#(1, t) provisos (Bits#(t, tSz), FShow#(t));
   endmodule
 endinstance
 
-instance Coalescer#(n, t) provisos (
+instance Coalescer#(n, k, t) provisos (
   Div#(n, 2, hn), Add#(hn, hm, n),
-  Coalescer#(hn, t), Coalescer#(hm, t),
+  Coalescer#(hn, k, t), Coalescer#(hm, k, t),
   Bits#(t, tSz), FShow#(t)
 );
 
   // General case
-  module mkCoalTree_#(function Ordering comp(t x, t y)) (CoalTree#(n, t));
+  module mkCoalTree_#(function t merge(t x, t y)) (CoalTree#(n, k, t));
     // two subtrees
-    CoalTree#(hn, t) l <- mkCoalTree_(comp);
-    CoalTree#(hm, t) r <- mkCoalTree_(comp);
-    Reg#(CoalReq#(n, t)) out <- mkReg(CoalReq {mask: 0, req: unpack(0)});
+    CoalTree#(hn, k, t) l <- mkCoalTree_(merge);
+    CoalTree#(hm, k, t) r <- mkCoalTree_(merge);
+    Reg#(CoalResp#(n, k, t)) out <- mkReg(CoalResp {mask: 0, kv: unpack(0)});
     Reg#(Bool) empty[2] <- mkCReg(2, True);
     Reg#(Bool) epoch <- mkReg(False);
 
     let epochL = l.getEpoch;
     let epochR = r.getEpoch;
-    let reqL = l.first;
-    let reqR = r.first;
+    let respL = l.first;
+    let respR = r.first;
 
-    CoalReq#(n, t) selL = CoalReq {
-      mask: {0, reqL.mask},
-      req: reqL.req
+    CoalResp#(n, k, t) selL = CoalResp {
+      mask: {0, respL.mask},
+      kv: respL.kv
     }; // select left
 
-    CoalReq#(n, t) selR = CoalReq {
-      mask: {reqR.mask, 0},
-      req: reqR.req
+    CoalResp#(n, k, t) selR = CoalResp {
+      mask: {respR.mask, 0},
+      kv: respR.kv
     }; // select right
 
-    CoalReq#(n, t) selB = CoalReq {
-      mask: {reqR.mask, reqL.mask},
-      req: reqL.req
+    CoalResp#(n, k, t) selB = CoalResp {
+      mask: {respR.mask, respL.mask},
+      kv: KV {key: respL.kv.key, val: merge(respL.kv.val, respR.kv.val)}
     }; // select both
 
-    let dir = comp(reqL.req, reqR.req);
+    let dir = compare(respL.kv.key, respR.kv.key);
     let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
 
     (* fire_when_enabled *)
@@ -93,12 +102,12 @@ instance Coalescer#(n, t) provisos (
       // $display(fshow("get_result_both, ") + fshow(reqL) + fshow(reqR) + $format("epochL: %b, epochR: %b", epochL, epochR));
       if (epochL == epochR) begin // update epoch
         epoch <= epochL;
-        if (reqL.mask != 0 && reqR.mask != 0) begin
+        if (respL.mask != 0 && respR.mask != 0) begin
           out <= sel;
           if (dir != GT) l.deq;
           if (dir != LT) r.deq;
         end else begin
-          out <= reqL.mask == 0 ? selR : selL;
+          out <= respL.mask == 0 ? selR : selL;
           l.deq; r.deq;
         end
       end else if (epochL == epoch) begin // reqL cannot be empty
@@ -131,7 +140,7 @@ instance Coalescer#(n, t) provisos (
       // else, wait until the left subtree catches up
     endrule
 
-    method Action enq(Vector#(n, Maybe#(t)) v);
+    method Action enq(CoalReq#(n, k, t) v);
       l.enq(take(v));
       r.enq(takeTail(v));
     endmethod
@@ -148,10 +157,10 @@ instance Coalescer#(n, t) provisos (
 endinstance
 
 // guard deq and first only at the interface
-module mkCoalTree#(function Ordering comp (t x, t y)) (CoalTree#(n, t))
-  provisos (Coalescer#(n, t));
+module mkCoalTree#(function t merge (t x, t y)) (CoalTree#(n, k, t))
+  provisos (Coalescer#(n, k, t));
   (* hide *)
-  CoalTree#(n, t) inner <- mkCoalTree_(comp);
+  CoalTree#(n, k, t) inner <- mkCoalTree_(merge);
   method enq = inner.enq;
   method notEmpty = inner.notEmpty;
   method getEpoch = inner.getEpoch;
