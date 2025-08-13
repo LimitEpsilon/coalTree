@@ -155,7 +155,7 @@ module mkCFFifo#(Bool guardEnq, Bool guardDeq) (Fifo#(n, t)) provisos (Bits#(t, 
   // n is size of fifo
   // t is data type of fifo
   Vector#(n, Reg#(t))     data      <- replicateM(mkRegU);
-  RWire#(void)            enqReq    <- mkRWire;
+  RWire#(t)               enqReq    <- mkRWire;
   RWire#(void)            deqReq    <- mkRWire;
   RWire#(void)            clearReq  <- mkRWire;
   Reg#(Bit#(TLog#(n)))    enqP      <- mkReg(0);
@@ -174,7 +174,8 @@ module mkCFFifo#(Bool guardEnq, Bool guardDeq) (Fifo#(n, t)) provisos (Bits#(t, 
       deqP <= 0;
       empty <= True;
       full <= False;
-    end else if (isValid(enqReq.wget)) begin
+    end else if (enqReq.wget matches tagged Valid .x) begin
+      data[enqP] <= x;
       enqP <= nextEnqP;
       if (isValid(deqReq.wget))
         deqP <= nextDeqP;
@@ -192,8 +193,7 @@ module mkCFFifo#(Bool guardEnq, Bool guardDeq) (Fifo#(n, t)) provisos (Bits#(t, 
   method Bool notFull = !full;
 
   method Action enq(t x) if (!guardEnq || !full);
-    data[enqP] <= x;
-    enqReq.wset(?);
+    enqReq.wset(x);
   endmethod
 
   method Bool notEmpty = !empty;

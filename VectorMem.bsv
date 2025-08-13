@@ -54,8 +54,8 @@ typedef Server#(VecMemoryRequest#(n, a, d), VecMemoryResponse#(n, d))
 // Currently, we assume d = 4 (32 bit word), w = 6 (512 bit DRAM interface)
 module mkVecMemoryServer#(MemoryServer#(h, w8) m) (VecMemoryServer#(n, a, d) ifc)
   provisos (
-    Add#(1, subd, d), Add#(1, subw, TExp#(w)), Add#(subw, d, TAdd#(TExp#(w), subd)),
-    Add#(d, _, TExp#(w)), Add#(subd, TAdd#(1, _), TExp#(w)),
+    Add#(1, subd, d), Add#(1, subw, TExp#(w)),
+    Add#(subd, _, TExp#(w)), Add#(subw, d, TAdd#(TExp#(w), subd)),
     Add#(h, w, a), Mul#(TExp#(w), 8, w8), Div#(w8, 8, TExp#(w)),
     Coalescer#(n, h, MemoryPayload#(w, subd))
   );

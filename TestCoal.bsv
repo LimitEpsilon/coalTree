@@ -1,11 +1,11 @@
 import Randomizable::*;
 import CoalTree::*;
-import MergeTree::*;
 import VectorMem::*;
 import Memory::*;
 import ClientServer::*;
 import GetPut::*;
 import Vector::*;
+import MulDiv::*;
 
 typedef 17 VecWidth;
 typedef UInt#(2) TestData;
