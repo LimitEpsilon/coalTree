@@ -1,4 +1,3 @@
-import Vector::*;
 import GetPut::*;
 import BRAMCore::*;
 import BRAM::*;
@@ -59,8 +58,8 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
     memory.a.put(writeA, pack(addrA), dataA);
     memory.b.put(writeB, pack(addrB), dataB);
 
-    // bypass when write to A and read to B with same addresses
-    bypassValid <= isReqA && wrA && !isClearB && isReqB && !wrB && addrEq;
+    // bypass when write to A, and B requests the same address
+    bypassValid <= isReqA && wrA && !isClearB && isReqB && addrEq;
     bypass <= dataA;
 
     // FIFOs
@@ -117,9 +116,8 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
     endinterface
     interface Get response;
       method ActionValue#(t) get if (respAValid[1]);
-        let resp = respA[1];
         deqA.wset(?);
-        return resp;
+        return respA[1];
       endmethod
     endinterface
   endinterface
@@ -132,9 +130,8 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
     endinterface
     interface Get response;
       method ActionValue#(t) get if (respBValid[1]);
-        let resp = respB[1];
         deqB.wset(?);
-        return resp;
+        return respB[1];
       endmethod
     endinterface
   endinterface
