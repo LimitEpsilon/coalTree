@@ -20,6 +20,7 @@ endmodule
 (* synthesize *)
 module mkTopBRAM(Empty);
   let m <- mkMyBRAM;
+  Vector#(2, Array#(Reg#(Data))) model <- replicateM(mkCRegU(2));
   Randomize#(Bool) randomWriteA <- mkGenericRandomizer;
   Randomize#(Bool) randomWriteB <- mkGenericRandomizer;
   Randomize#(Addr) randomAddrA <- mkGenericRandomizer;
@@ -28,6 +29,9 @@ module mkTopBRAM(Empty);
   Randomize#(Data) randomDataB <- mkGenericRandomizer;
   Randomize#(Bool) randomGetA <- mkGenericRandomizer;
   Randomize#(Bool) randomGetB <- mkGenericRandomizer;
+
+  RWire#(BRAMRequest#(Addr, Data)) reqAWire <- mkRWire;
+  RWire#(BRAMRequest#(Addr, Data)) reqBWire <- mkRWire;
 
   Reg#(UInt#(32)) countA <- mkReg(0);
   Reg#(UInt#(32)) countB <- mkReg(0);
@@ -54,6 +58,22 @@ module mkTopBRAM(Empty);
     cycle <= cycle + 1;
   endrule
 
+  (* fire_when_enabled, no_implicit_conditions *)
+  rule canonicalizeA;
+    if (reqAWire.wget matches tagged Valid .rA) begin
+      if (rA.write) model[rA.address][0] <= rA.datain;
+      else $display("PortA model response: %d", model[rA.address][0]);
+    end
+  endrule
+
+  (* fire_when_enabled, no_implicit_conditions *)
+  rule canonicalizeB;
+    if (reqBWire.wget matches tagged Valid .rB) begin
+      if (rB.write) model[rB.address][1] <= rB.datain;
+      else $display("PortB model response: %d", model[rB.address][1]);
+    end
+  endrule
+
   (* fire_when_enabled *)
   rule putA;
     let writeA <- randomWriteA.next;
@@ -62,6 +82,7 @@ module mkTopBRAM(Empty);
     let reqA = BRAMRequest {write: writeA, address: addrA, datain: dataA};
 
     m.portA.request.put(reqA);
+    reqAWire.wset(reqA);
     $display("PortA request: %s, address %d, data %d", writeA ? "write" : "read", addrA, dataA);
   endrule
 
@@ -73,6 +94,7 @@ module mkTopBRAM(Empty);
     let reqB = BRAMRequest {write: writeB, address: addrB, datain: dataB};
 
     m.portB.request.put(reqB);
+    reqBWire.wset(reqB);
     $display("PortB request: %s, address %d, data %d", writeB ? "write" : "read", addrB, dataB);
   endrule
 

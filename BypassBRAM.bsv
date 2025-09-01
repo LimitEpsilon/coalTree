@@ -8,16 +8,15 @@ import BRAM::*;
 // If portA is given a write request and portB is given a read request at the same cycle,
 // the response at portB will be the data written by A if the addresses match
 module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
-
   Integer memSize = 2 ** valueOf(l);
   BRAM_DUAL_PORT#(Bit#(l), t)          memory    <- mkBRAMCore2(memSize, False);
 
   // holds whether pending request is a read or a write
-  FIFOF#(Bool)                         pendingA  <- mkUGLFIFOF;
+  Reg#(Maybe#(Bool))                   pendingA  <- mkReg(tagged Invalid);
   Reg#(Maybe#(t))                      midA[3]   <- mkCReg(3, tagged Invalid);
   FIFOF#(t)                            respA     <- mkUGFIFOF;
   // holds whether pending request is a read or a write
-  FIFOF#(Bool)                         pendingB  <- mkUGLFIFOF;
+  Reg#(Maybe#(Bool))                   pendingB  <- mkReg(tagged Invalid);
   Reg#(Maybe#(t))                      midB[3]   <- mkCReg(3, tagged Invalid);
   FIFOF#(t)                            respB     <- mkUGFIFOF;
   // data to bypass
@@ -27,7 +26,7 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
   RWire#(void)                         clearA    <- mkRWire;
   RWire#(void)                         clearB    <- mkRWire;
 
-  // clearPendingA < clearPendingB < portA.request.put < portB.request.put < canonicalize
+  // clear_pendingA < clear_pendingB < portA.request.put < portB.request.put < canonicalize
   (* fire_when_enabled, no_implicit_conditions *)
   rule canonicalize;
     let isClearA = isValid(clearA.wget);
@@ -57,33 +56,33 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
 
     // FIFOs
     if (isClearA) begin
-      pendingA.clear;
+      pendingA <= tagged Invalid;
       midA[2] <= tagged Invalid;
       respA.clear;
-    end else if (isReqA) begin
-      pendingA.enq(wrA);
-    end
+    end else if (isReqA)
+      pendingA <= tagged Valid wrA;
+    else
+      pendingA <= tagged Invalid;
 
     if (isClearB) begin
-      pendingB.clear;
+      pendingB <= tagged Invalid;
       midB[2] <= tagged Invalid;
       respB.clear;
-    end else if (isReqB) begin
-      pendingB.enq(wrB);
-    end
+    end else if (isReqB)
+      pendingB <= tagged Valid wrB;
+    else
+      pendingB <= tagged Invalid;
   endrule
 
   (* fire_when_enabled, no_implicit_conditions *)
-  rule clearPendingA; // never drops a read
-    if (pendingA.notEmpty) begin
-      if (!pendingA.first) // midA[0] should be Invalid
+  rule clear_pendingA; // never drops a read
+    if (pendingA matches tagged Valid .wr) // midA[0] should be Invalid
+      if (!wr)
         midA[0] <= tagged Valid memory.a.read;
-      pendingA.deq;
-    end
   endrule
 
   (* fire_when_enabled, no_implicit_conditions *)
-  rule clearMidA;
+  rule clear_midA;
     if (respA.notFull &&& midA[1] matches tagged Valid .d) begin
       respA.enq(d);
       midA[1] <= tagged Invalid;
@@ -91,20 +90,17 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
   endrule
 
   (* fire_when_enabled, no_implicit_conditions *)
-  rule clearPendingB; // never drops a read
-    if (pendingB.notEmpty) begin // midB[0] should be Invalid
-      if (!pendingB.first) begin
+  rule clear_pendingB; // never drops a read
+    if (pendingB matches tagged Valid .wr) // midB[0] should be Invalid
+      if (!wr)
         if (bypass matches tagged Valid .d)
           midB[0] <= tagged Valid d;
         else
           midB[0] <= tagged Valid memory.b.read;
-      end
-      pendingB.deq;
-    end
   endrule
 
   (* fire_when_enabled, no_implicit_conditions *)
-  rule clearMidB;
+  rule clear_midB;
     if (respB.notFull &&& midB[1] matches tagged Valid .d) begin
       respB.enq(d);
       midB[1] <= tagged Invalid;
@@ -113,7 +109,7 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
 
   interface BRAMServer portA;
     interface Put request;
-      method Action put(BRAMRequest#(a, t) req) if (pendingA.notFull && !isValid(midA[2]));
+      method Action put(BRAMRequest#(a, t) req) if (!isValid(midA[2]));
         reqA.wset(req);
       endmethod
     endinterface
@@ -128,7 +124,7 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
 
   interface BRAMServer portB;
     interface Put request;
-      method Action put(BRAMRequest#(a, t) req) if (pendingA.notFull || !isValid(midB[2]));
+      method Action put(BRAMRequest#(a, t) req) if (!isValid(midB[2]));
         reqB.wset(req);
       endmethod
     endinterface
