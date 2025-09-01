@@ -1,4 +1,5 @@
 import Vector::*;
+import FIFOF::*;
 import GetPut::*;
 import BRAMCore::*;
 import ConfigReg::*;
@@ -284,6 +285,52 @@ module mkBRAMFifo#(Bool guardEnq, Bool guardDeq) (Fifo#(n, t))
 
   method Action clear;
     pwClear.send();
+  endmethod
+endmodule
+
+module mkLatencyFifo#(Bool guardEnq, Bool guardDeq) (Fifo#(n, t)) provisos (Bits#(t, tSz), Add#(subn, 2, n));
+  FIFOF#(t) frontStage <- mkGFIFOF(!guardEnq, False);
+  Vector#(subn, FIFOF#(t)) middle <- replicateM(mkLFIFOF);
+  FIFOF#(t) endStage <- mkGFIFOF(False, !guardDeq);
+
+  for (Integer i = 1; i < valueOf(subn); i = i + 1) begin
+    (* fire_when_enabled *)
+    rule shift_middle;
+      middle[i].enq(middle[i-1].first);
+      middle[i-1].deq;
+    endrule
+  end
+
+  if (valueOf(subn) != 0) begin
+    (* fire_when_enabled *)
+    rule shift_front;
+      middle[0].enq(frontStage.first);
+      frontStage.deq;
+    endrule
+
+    (* fire_when_enabled *)
+    rule shift_end;
+      endStage.enq(middle[valueOf(subn)-1].first);
+      middle[valueOf(subn)-1].deq;
+    endrule
+  end else begin
+    (* fire_when_enabled *)
+    rule shift;
+      endStage.enq(frontStage.first);
+      frontStage.deq;
+    endrule
+  end
+
+  method Action enq(t x) = frontStage.enq(x);
+  method Action deq = endStage.deq;
+  method t first = endStage.first;
+  method Bool notFull = frontStage.notFull;
+  method Bool notEmpty = endStage.notEmpty;
+  method Action clear;
+    frontStage.clear;
+    for (Integer i = 0; i < valueOf(subn); i = i + 1)
+      middle[i].clear;
+    endStage.clear;
   endmethod
 endmodule
 

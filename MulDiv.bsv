@@ -1,9 +1,11 @@
-import FIFO::*;
+import Fifo::*;
+import Vector::*;
 
 typedef 17 MulWidth;
 typedef TMul#(2, MulWidth) AddWidth;
 
-interface UnsafeMAdd;
+// Fused Multiply-Add (FMA)
+interface UnsafeFMA;
   (* always_ready *)
   method Action enq(UInt#(MulWidth) a, UInt#(MulWidth) b, UInt#(AddWidth) c, Bool sub);
   (* always_ready *)
@@ -12,7 +14,7 @@ endinterface
 
 // fixed latency of two cycles
 (* synthesize *)
-module mkUnsafeMAdd (UnsafeMAdd);
+module mkUnsafeFMA (UnsafeFMA);
   Reg#(UInt#(MulWidth)) a_r <- mkReg(0);
   Reg#(UInt#(MulWidth)) b_r <- mkReg(0);
   Reg#(UInt#(AddWidth)) c_r <- mkReg(0);
@@ -34,26 +36,26 @@ typedef struct {
   UInt#(MulWidth) b;
   UInt#(AddWidth) c;
   Bool sub;
-} MAddReq deriving (Bits, Eq, FShow);
+} FMAReq deriving (Bits, Eq, FShow);
 
-interface MAdd;
+interface FMA;
   method Action enq(UInt#(MulWidth) a, UInt#(MulWidth) b, UInt#(AddWidth) c, Bool sub);
   method UInt#(TAdd#(1, AddWidth)) first; // unguarded
   method Action deq;
 endinterface
 
 (* synthesize *)
-module mkMAdd (MAdd);
-  let m <- mkUnsafeMAdd;
+module mkFMA (FMA);
+  let m <- mkUnsafeFMA;
   let computed <- mkReg(False);
   let latched <- mkReg(False);
   RWire#(void) deqReq <- mkRWire;
-  RWire#(MAddReq) enqReq <- mkRWire;
+  RWire#(FMAReq) enqReq <- mkRWire;
 
   (* fire_when_enabled, no_implicit_conditions *)
   rule canonicalize;
     if (enqReq.wget matches tagged Valid .req) begin
-      match MAddReq {a: .a, b: .b, c: .c, sub: .sub} = req;
+      match FMAReq {a: .a, b: .b, c: .c, sub: .sub} = req;
       m.enq(a, b, c, sub);
       computed <= latched;
       latched <= True;
@@ -65,7 +67,7 @@ module mkMAdd (MAdd);
   endrule
 
   method Action enq(UInt#(MulWidth) a, UInt#(MulWidth) b, UInt#(AddWidth) c, Bool sub) if (isValid(deqReq.wget) || !computed);
-    enqReq.wset(MAddReq {a: a, b: b, c: c, sub: sub});
+    enqReq.wset(FMAReq {a: a, b: b, c: c, sub: sub});
   endmethod
 
   method UInt#(TAdd#(1, AddWidth)) first = m.first;
@@ -81,16 +83,18 @@ interface Mul32;
   method Action deq;
 endinterface
 
+// latency 5
+(* synthesize *)
 module mkMul32 (Mul32);
-  let mulUpper <- mkMAdd;
-  let mulMiddle <- mkMAdd;
-  let mulLower <- mkMAdd;
-  FIFO#(Tuple2#(Bit#(32), Bit#(32))) uxy <- mkFIFO;
-  FIFO#(Tuple2#(UInt#(MulWidth), UInt#(MulWidth))) middleArgs <- mkFIFO;
-  FIFO#(Bit#(32)) upperRes <- mkSizedFIFO(3);
-  FIFO#(Bit#(32)) lowerRes <- mkSizedFIFO(3);
-  FIFO#(Bool) resNeg <- mkSizedFIFO(6);
-  FIFO#(Bit#(64)) res <- mkFIFO;
+  let mulUpper <- mkFMA;
+  let mulMiddle <- mkFMA;
+  let mulLower <- mkFMA;
+  Fifo#(1, Tuple2#(Bit#(32), Bit#(32))) uxy <- mkPipelineFifo(True, True);
+  Fifo#(1, Tuple2#(UInt#(MulWidth), UInt#(MulWidth))) middleArgs <- mkPipelineFifo(True, True);
+  Fifo#(2, Bit#(32)) upperRes <- mkLatencyFifo(True, True);
+  Fifo#(2, Bit#(32)) lowerRes <- mkLatencyFifo(True, True);
+  Fifo#(4, Bool) resNeg <- mkLatencyFifo(True, True);
+  Fifo#(2, Bit#(64)) res <- mkCFFifo(True, True);
 
   (* fire_when_enabled *)
   rule compute_middle;
@@ -105,13 +109,16 @@ module mkMul32 (Mul32);
 
   (* fire_when_enabled *)
   rule multiply_middle;
-    UInt#(AddWidth) upper = truncate(mulUpper.first);
-    UInt#(AddWidth) lower = truncate(mulLower.first);
+    Bit#(32) upper = truncate(pack(mulUpper.first));
+    Bit#(32) lower = truncate(pack(mulLower.first));
     match {.ux, .uy} = middleArgs.first;
 
-    upperRes.enq(truncate(pack(upper)));
-    mulMiddle.enq(ux, uy, upper + lower, True);
-    lowerRes.enq(truncate(pack(lower)));
+    let lower1 = lower - extend(lower[31:16]);
+    UInt#(AddWidth) middleSub = unpack(extend(upper)) + unpack(extend(lower1));
+
+    upperRes.enq(upper);
+    mulMiddle.enq(ux, uy, middleSub, True);
+    lowerRes.enq(lower);
 
     mulUpper.deq;
     mulLower.deq;
@@ -125,9 +132,8 @@ module mkMul32 (Mul32);
     let lower = lowerRes.first;
     let neg = resNeg.first;
 
-    Bit#(33) middle1 = truncate(middle) + extend(lower[31:16]);
-    Bit#(32) upper1 = upper + extend(middle1[32:16]);
-    Bit#(64) abs = {upper1, middle1[15:0], lower[15:0]};
+    Bit#(32) upper1 = upper + extend(middle[32:16]);
+    Bit#(64) abs = {upper1, middle[15:0], lower[15:0]};
     res.enq(neg ? -abs : abs);
 
     upperRes.deq;
@@ -154,5 +160,97 @@ module mkMul32 (Mul32);
 
   method first = res.first;
   method Action deq; res.deq; endmethod
+endmodule
+
+interface Div32;
+  method Action enq(Bool num_is_signed, Bit#(32) num, Bool den_is_signed, Bit#(32) den);
+  method Tuple2#(Bit#(32), Bit#(32)) first;
+  method Action deq;
+endinterface
+
+typedef struct {
+  Bool done;
+  Bool qneg;
+  Bool rneg;
+  Bit#(32) quot; // quotient
+  Bit#(32) den;  // denominator
+  Bit#(32) rem;  // remainder
+} DivRes deriving (Bits, Eq, FShow);
+
+typedef function DivRes d(DivRes x) DivStep;
+
+(* noinline *)
+function DivRes divStep(DivRes x);
+  match DivRes {qneg: .qneg, rneg: .rneg, quot: .quot, den: .den, rem: .rem} = x;
+  Vector#(32, Bool) r = reverse(unpack(rem));
+  let rExp = fromMaybe(?, findIndex(id, r)); // rem = 2 ^ (32 - rExp) * 1.xxxx...
+  Vector#(32, Bool) d = reverse(unpack(den));
+  let dExp = fromMaybe(?, findIndex(id, d)); // den = 2 ^ (32 - dExp) * 1.xxxx...
+  let shamt = dExp - rExp;
+  let quotShift = 32'b1 << shamt;
+  let denShift = den << shamt;
+
+  let quot1 = quot | quotShift;
+  let quot2 = quot | {1'b0, quotShift[31:1]};
+  let rem1 = rem - denShift;
+  let rem2 = rem - {1'b0, denShift[31:1]};
+  Bool rem1Neg = unpack(rem1[31]);
+
+  let done = den == 0 || rem < den;
+  if (!done) quot = rem1Neg ? quot2 : quot1;
+  if (!done) rem = rem1Neg ? rem2 : rem1;
+  return DivRes {done: done, qneg: qneg, rneg: rneg, quot: quot, den: den, rem: rem};
+endfunction
+
+typedef 4 DivStage;
+
+(* synthesize *)
+module mkDiv32 (Div32);
+  Vector#(DivStage, DivStep) divs = replicate(divStep);
+  Vector#(DivStage, Reg#(Maybe#(DivRes))) res <- replicateM(mkReg(tagged Invalid));
+  Fifo#(2, Tuple2#(Bit#(32), Bit#(32))) out <- mkCFFifo(False, False);
+  RWire#(DivRes) enqReq <- mkRWire;
+
+  function DivRes genDiv(Integer i) = divs[i](fromMaybe(?, res[i]));
+  function Bool genVal(Integer i) = isValid(res[i]);
+
+  Vector#(DivStage, DivRes) stepped = genWith(genDiv);
+  Vector#(DivStage, Bool) valid = genWith(genVal);
+  Vector#(TAdd#(1, DivStage), Bool) notFull = ?;
+  Integer divStage = valueOf(DivStage);
+  notFull[divStage] = out.notFull && fromMaybe(?, res[divStage-1]).done;
+  for (Integer i = divStage - 1; i >= 0; i = i - 1)
+    notFull[i] = notFull[i+1] || !valid[i];
+
+  (* fire_when_enabled, no_implicit_conditions *)
+  rule shift;
+    if (res[divStage-1] matches tagged Valid .r) begin
+      match DivRes {done: .done, qneg: .qneg, rneg: .rneg, quot: .quot, rem: .rem} = r;
+      if (out.notFull && done) out.enq(tuple2(qneg ? -quot : quot, rneg ? -rem : rem));
+    end
+    for (Integer i = divStage-1; i > 0; i = i - 1)
+      if (notFull[i])
+        res[i] <= valid[i-1] ? tagged Valid stepped[i-1] : tagged Invalid;
+      else
+        res[i] <= valid[i] ? tagged Valid stepped[i] : tagged Invalid;
+    if (notFull[0])
+      res[0] <= enqReq.wget;
+    else
+      res[0] <= valid[0] ? tagged Valid stepped[0] : tagged Invalid;
+  endrule
+
+  method Action enq(Bool nsigned, Bit#(32) num, Bool dsigned, Bit#(32) den) if (notFull[0]);
+    Bool nneg = nsigned && unpack(msb(num));
+    Bool dneg = dsigned && unpack(msb(den));
+    let qneg = nneg != dneg;
+    let rneg = nneg;
+    let rem = nneg ? -num : num;
+    let den1 = dneg ? -den : den;
+    let req = DivRes {done: False, qneg: qneg, rneg: rneg, quot: 0, den: den1, rem: rem};
+    enqReq.wset(req);
+  endmethod
+
+  method first if (out.notEmpty) = out.first;
+  method deq if (out.notEmpty) = out.deq;
 endmodule
 

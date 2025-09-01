@@ -4,11 +4,13 @@ compile:
 	mkdir -p buildDir
 	bsc -u -bdir buildDir -info-dir buildDir -simdir buildDir -vdir buildDir $(BSC_FLAGS) TestCoal.bsv
 	bsc -u -bdir buildDir -info-dir buildDir -simdir buildDir -vdir buildDir $(BSC_FLAGS) TestMem.bsv
+	bsc -u -bdir buildDir -info-dir buildDir -simdir buildDir -vdir buildDir $(BSC_FLAGS) TestBRAM.bsv
 	bsc -u -bdir buildDir -info-dir buildDir -simdir buildDir -vdir buildDir $(BSC_FLAGS) TestStack.bsv
 
 test: compile
 	bsc -e mkTopCoal -bdir buildDir -info-dir buildDir -simdir buildDir $(BSC_FLAGS) -o simTestCoal
 	bsc -e mkTopMem -bdir buildDir -info-dir buildDir -simdir buildDir $(BSC_FLAGS) -o simTestMem
+	bsc -e mkTopBRAM -bdir buildDir -info-dir buildDir -simdir buildDir $(BSC_FLAGS) -o simTestBRAM
 	bsc -e mkTopStack -bdir buildDir -info-dir buildDir -simdir buildDir $(BSC_FLAGS) -o simTestStack
 
 all: test

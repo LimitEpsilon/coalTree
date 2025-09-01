@@ -5,7 +5,7 @@ import Memory::*;
 import ClientServer::*;
 import GetPut::*;
 import Vector::*;
-import MulDiv::*;
+import BRAM::*;
 
 typedef 17 VecWidth;
 typedef UInt#(2) TestData;
@@ -20,8 +20,17 @@ module coalTree(CoalTree#(VecWidth, 2, void));
 endmodule
 
 (* synthesize *)
+module testBRAM(BRAM2Port#(Bit#(1), TestData));
+  BRAM_Configure cfg = defaultValue;
+  cfg.memorySize = 2;
+  let ram <- mkBRAM2Server(cfg);
+  return ram;
+endmodule
+
+(* synthesize *)
 module mkTopCoal(Empty);
   let cTree <- coalTree;
+  let ram <- testBRAM;
   Randomize#(Bool) randomEnq <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, Bool)) randomInv <- mkGenericRandomizer;
   Randomize#(Vector#(VecWidth, TestData)) randomData <- mkGenericRandomizer;
@@ -37,6 +46,21 @@ module mkTopCoal(Empty);
       randomEnq.cntrl.init;
       randomInv.cntrl.init;
       randomData.cntrl.init;
+      ram.portA.request.put(BRAMRequest {
+	write: True,
+	responseOnWrite: False,
+	address: 0,
+	datain: 0
+      });
+      ram.portB.request.put(BRAMRequest {
+	write: False,
+	responseOnWrite: False,
+	address: 0,
+	datain: 0
+      });
+    end else if (cycle == 1) begin
+      let r <- ram.portB.response.get;
+      $display("%d", r);
     end
     $display("Cycle: %d over --------------------------------------------------", cycle);
     cycle <= cycle + 1;
