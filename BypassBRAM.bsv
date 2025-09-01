@@ -59,12 +59,9 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
     memory.a.put(writeA, pack(addrA), dataA);
     memory.b.put(writeB, pack(addrB), dataB);
 
-    // bypass register
-    if (isReqA && wrA && !isClearB && isReqB && !wrB && addrEq) begin
-      bypassValid <= True;
-      bypass <= dataA;
-    end else
-      bypassValid <= False;
+    // bypass when write to A and read to B with same addresses
+    bypassValid <= isReqA && wrA && !isClearB && isReqB && !wrB && addrEq;
+    bypass <= dataA;
 
     // FIFOs
     pendingAValid <= isReqA;
