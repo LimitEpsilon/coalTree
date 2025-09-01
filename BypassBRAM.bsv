@@ -8,24 +8,31 @@ import BRAM::*;
 // the response at portB will be the data written by A if the addresses match
 module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
   Integer memSize = 2 ** valueOf(l);
-  BRAM_DUAL_PORT#(Bit#(l), t)          memory    <- mkBRAMCore2(memSize, False);
+  BRAM_DUAL_PORT#(Bit#(l), t) memory         <- mkBRAMCore2(memSize, False);
 
   // holds whether pending request is a read or a write
-  Reg#(Maybe#(Bool))                   pendingA  <- mkReg(tagged Invalid);
-  Reg#(Maybe#(t))                      midA[3]   <- mkCReg(3, tagged Invalid);
-  Reg#(Maybe#(t))                      respA[2]  <- mkCReg(2, tagged Invalid);
+  Reg#(Bool)                  pendingAValid  <- mkReg(False);
+  Reg#(Bool)                  pendingA       <- mkRegU;
+  Reg#(Bool)                  midAValid[3]   <- mkCReg(3, False);
+  Reg#(t)                     midA[2]        <- mkCRegU(2);
+  Reg#(Bool)                  respAValid[2]  <- mkCReg(2, False);
+  Reg#(t)                     respA[2]       <- mkCRegU(2);
   // holds whether pending request is a read or a write
-  Reg#(Maybe#(Bool))                   pendingB  <- mkReg(tagged Invalid);
-  Reg#(Maybe#(t))                      midB[3]   <- mkCReg(3, tagged Invalid);
-  Reg#(Maybe#(t))                      respB[2]  <- mkCReg(2, tagged Invalid);
+  Reg#(Bool)                  pendingBValid  <- mkReg(False);
+  Reg#(Bool)                  pendingB       <- mkRegU;
+  Reg#(Bool)                  midBValid[3]   <- mkCReg(3, False);
+  Reg#(t)                     midB[2]        <- mkCRegU(2);
+  Reg#(Bool)                  respBValid[2]  <- mkCReg(2, False);
+  Reg#(t)                     respB[2]       <- mkCRegU(2);
   // data to bypass
-  Reg#(Maybe#(t))                      bypass    <- mkReg(tagged Invalid);
-  RWire#(BRAMRequest#(a, t))           reqA      <- mkRWire;
-  RWire#(BRAMRequest#(a, t))           reqB      <- mkRWire;
-  RWire#(void)                         clearA    <- mkRWire;
-  RWire#(void)                         clearB    <- mkRWire;
-  RWire#(void)                         deqA      <- mkRWire;
-  RWire#(void)                         deqB      <- mkRWire;
+  Reg#(Bool)                  bypassValid    <- mkReg(False);
+  Reg#(t)                     bypass         <- mkRegU;
+  RWire#(BRAMRequest#(a, t))  reqA           <- mkRWire;
+  RWire#(BRAMRequest#(a, t))  reqB           <- mkRWire;
+  RWire#(void)                clearA         <- mkRWire;
+  RWire#(void)                clearB         <- mkRWire;
+  RWire#(void)                deqA           <- mkRWire;
+  RWire#(void)                deqB           <- mkRWire;
 
   // clear_pendingA < clear_pendingB < portA.request.put < portB.request.put < canonicalize
   (* fire_when_enabled, no_implicit_conditions *)
@@ -53,63 +60,67 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
     memory.b.put(writeB, pack(addrB), dataB);
 
     // bypass register
-    if (isReqA && wrA && !isClearB && isReqB && !wrB && addrEq)
-      bypass <= tagged Valid dataA;
-    else
-      bypass <= tagged Invalid;
+    if (isReqA && wrA && !isClearB && isReqB && !wrB && addrEq) begin
+      bypassValid <= True;
+      bypass <= dataA;
+    end else
+      bypassValid <= False;
 
     // FIFOs
-    pendingA <= isReqA ? tagged Valid wrA : tagged Invalid;
-    if (isClearA) midA[2] <= tagged Invalid;
-    if (isClearA || isDeqA) respA[1] <= tagged Invalid;
+    pendingAValid <= isReqA;
+    pendingA <= wrA;
+    if (isClearA) midAValid[2] <= False;
+    if (isClearA || isDeqA) respAValid[1] <= False;
 
-    pendingB <= isReqB ? tagged Valid wrB : tagged Invalid;
-    if (isClearB) midB[2] <= tagged Invalid;
-    if (isClearB || isDeqB) respB[1] <= tagged Invalid;
+    pendingBValid <= isReqB;
+    pendingB <= wrB;
+    if (isClearB) midBValid[2] <= False;
+    if (isClearB || isDeqB) respBValid[1] <= False;
   endrule
 
   (* fire_when_enabled, no_implicit_conditions *)
   rule clear_pendingA; // never drops a read
-    if (pendingA matches tagged Valid .wr) // midA[0] should be Invalid
-      if (!wr)
-        midA[0] <= tagged Valid memory.a.read;
+    if (pendingAValid && !pendingA) begin // midA[0] should be Invalid
+      midAValid[0] <= True;
+      midA[0] <= memory.a.read;
+    end
   endrule
 
   (* fire_when_enabled, no_implicit_conditions *)
   rule clear_midA;
-    if (!isValid(respA[0]) &&& midA[1] matches tagged Valid .d) begin
-      respA[0] <= tagged Valid d;
-      midA[1] <= tagged Invalid;
+    if (!respAValid[0] && midAValid[1]) begin
+      respAValid[0] <= True;
+      respA[0] <= midA[1];
+      midAValid[1] <= False;
     end
   endrule
 
   (* fire_when_enabled, no_implicit_conditions *)
   rule clear_pendingB; // never drops a read
-    if (pendingB matches tagged Valid .wr) // midB[0] should be Invalid
-      if (!wr)
-        if (bypass matches tagged Valid .d)
-          midB[0] <= tagged Valid d;
-        else
-          midB[0] <= tagged Valid memory.b.read;
+    if (pendingBValid && !pendingB) begin // midB[0] should be Invalid
+      midBValid[0] <= True;
+      midB[0] <= bypassValid ? bypass : memory.b.read;
+    end
   endrule
 
   (* fire_when_enabled, no_implicit_conditions *)
   rule clear_midB;
-    if (!isValid(respB[0]) &&& midB[1] matches tagged Valid .d) begin
-      respB[0] <= tagged Valid d;
-      midB[1] <= tagged Invalid;
+    if (!respBValid[0] && midBValid[1]) begin
+      respBValid[0] <= True;
+      respB[0] <= midB[1];
+      midBValid[1] <= False;
     end
   endrule
 
   interface BRAMServer portA;
     interface Put request;
-      method Action put(BRAMRequest#(a, t) req) if (!isValid(midA[2]));
+      method Action put(BRAMRequest#(a, t) req) if (!midAValid[2]);
         reqA.wset(req);
       endmethod
     endinterface
     interface Get response;
-      method ActionValue#(t) get if (isValid(respA[1]));
-        let resp = fromMaybe(?, respA[1]);
+      method ActionValue#(t) get if (respAValid[1]);
+        let resp = respA[1];
         deqA.wset(?);
         return resp;
       endmethod
@@ -118,13 +129,13 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
 
   interface BRAMServer portB;
     interface Put request;
-      method Action put(BRAMRequest#(a, t) req) if (!isValid(midB[2]));
+      method Action put(BRAMRequest#(a, t) req) if (!midBValid[2]);
         reqB.wset(req);
       endmethod
     endinterface
     interface Get response;
-      method ActionValue#(t) get if (isValid(respB[1]));
-        let resp = fromMaybe(?, respB[1]);
+      method ActionValue#(t) get if (respBValid[1]);
+        let resp = respB[1];
         deqB.wset(?);
         return resp;
       endmethod
