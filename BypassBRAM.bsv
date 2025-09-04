@@ -12,14 +12,14 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
   // holds whether pending request is a read or a write
   Reg#(Bool)                  pendingAValid  <- mkReg(False);
   Reg#(Bool)                  pendingA       <- mkRegU;
-  Reg#(Bool)                  midAValid[3]   <- mkCReg(3, False);
+  Reg#(Bool)                  midAValid[2]   <- mkCReg(2, False);
   Reg#(t)                     midA[2]        <- mkCRegU(2);
   Reg#(Bool)                  respAValid[2]  <- mkCReg(2, False);
   Reg#(t)                     respA[2]       <- mkCRegU(2);
   // holds whether pending request is a read or a write
   Reg#(Bool)                  pendingBValid  <- mkReg(False);
   Reg#(Bool)                  pendingB       <- mkRegU;
-  Reg#(Bool)                  midBValid[3]   <- mkCReg(3, False);
+  Reg#(Bool)                  midBValid[2]   <- mkCReg(2, False);
   Reg#(t)                     midB[2]        <- mkCRegU(2);
   Reg#(Bool)                  respBValid[2]  <- mkCReg(2, False);
   Reg#(t)                     respB[2]       <- mkCRegU(2);
@@ -59,18 +59,16 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
     memory.b.put(writeB, pack(addrB), dataB);
 
     // bypass when write to A, and B requests the same address
-    bypassValid <= isReqA && wrA && !isClearB && isReqB && addrEq;
+    bypassValid <= isReqA && wrA && isReqB && addrEq;
     bypass <= dataA;
 
     // FIFOs
     pendingAValid <= isReqA;
     pendingA <= wrA;
-    if (isClearA) midAValid[2] <= False;
     if (isClearA || isDeqA) respAValid[1] <= False;
 
     pendingBValid <= isReqB;
     pendingB <= wrB;
-    if (isClearB) midBValid[2] <= False;
     if (isClearB || isDeqB) respBValid[1] <= False;
   endrule
 
@@ -110,7 +108,7 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
 
   interface BRAMServer portA;
     interface Put request;
-      method Action put(BRAMRequest#(a, t) req) if (!midAValid[2]);
+      method Action put(BRAMRequest#(a, t) req) if (!respAValid[0] || !midAValid[1]);
         reqA.wset(req);
       endmethod
     endinterface
@@ -124,7 +122,7 @@ module mkBypassBRAM(BRAM2Port#(a, t)) provisos (Bits#(a, l), Bits#(t, tSz));
 
   interface BRAMServer portB;
     interface Put request;
-      method Action put(BRAMRequest#(a, t) req) if (!midBValid[2]);
+      method Action put(BRAMRequest#(a, t) req) if (!respBValid[0] || !midBValid[1]);
         reqB.wset(req);
       endmethod
     endinterface
