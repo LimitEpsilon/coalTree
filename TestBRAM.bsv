@@ -32,6 +32,8 @@ module mkTopBRAM(Empty);
 
   RWire#(BRAMRequest#(Addr, Data)) reqAWire <- mkRWire;
   RWire#(BRAMRequest#(Addr, Data)) reqBWire <- mkRWire;
+  Reg#(Addr) addressA <- mkRegU;
+  Reg#(Addr) addressB <- mkRegU;
 
   Reg#(UInt#(32)) countA <- mkReg(0);
   Reg#(UInt#(32)) countB <- mkReg(0);
@@ -58,22 +60,6 @@ module mkTopBRAM(Empty);
     cycle <= cycle + 1;
   endrule
 
-  (* fire_when_enabled, no_implicit_conditions *)
-  rule canonicalizeA;
-    if (reqAWire.wget matches tagged Valid .rA) begin
-      if (rA.write) model[rA.address][0] <= rA.datain;
-      else $display("PortA model response: %d", model[rA.address][0]);
-    end
-  endrule
-
-  (* fire_when_enabled, no_implicit_conditions *)
-  rule canonicalizeB;
-    if (reqBWire.wget matches tagged Valid .rB) begin
-      if (rB.write) model[rB.address][1] <= rB.datain;
-      else $display("PortB model response: %d", model[rB.address][1]);
-    end
-  endrule
-
   (* fire_when_enabled *)
   rule putA;
     let writeA <- randomWriteA.next;
@@ -82,7 +68,8 @@ module mkTopBRAM(Empty);
     let reqA = BRAMRequest {write: writeA, address: addrA, datain: dataA};
 
     m.portA.request.put(reqA);
-    reqAWire.wset(reqA);
+    if (writeA) model[addrA][0] <= dataA;
+    else addressA <= addrA;
     $display("PortA request: %s, address %d, data %d", writeA ? "write" : "read", addrA, dataA);
   endrule
 
@@ -94,7 +81,8 @@ module mkTopBRAM(Empty);
     let reqB = BRAMRequest {write: writeB, address: addrB, datain: dataB};
 
     m.portB.request.put(reqB);
-    reqBWire.wset(reqB);
+    if (writeB) model[addrB][1] <= dataB; // write ordered after putA
+    else addressB <= addrB;
     $display("PortB request: %s, address %d, data %d", writeB ? "write" : "read", addrB, dataB);
   endrule
 
@@ -103,8 +91,9 @@ module mkTopBRAM(Empty);
     let doResp <- randomGetA.next;
     if (doResp) begin
       let resp <- m.portA.response.get;
+      let modelResp = model[addressA][0];
       countA <= countA + 1;
-      $display("PortA response: %d", resp);
+      $display("%s: PortA response: %d, model response: %d", resp == modelResp ? "SUCCESS" : "FAILED", resp, modelResp);
     end
   endrule
 
@@ -113,8 +102,9 @@ module mkTopBRAM(Empty);
     let doResp <- randomGetB.next;
     if (doResp) begin
       let resp <- m.portB.response.get;
+      let modelResp = model[addressB][0];
       countB <= countB + 1;
-      $display("PortB response: %d", resp);
+      $display("%s: PortB response: %d, model response: %d", resp == modelResp ? "SUCCESS" : "FAILED", resp, modelResp);
     end
   endrule
 
