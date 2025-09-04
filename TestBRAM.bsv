@@ -21,17 +21,12 @@ endmodule
 module mkTopBRAM(Empty);
   let m <- mkMyBRAM;
   Vector#(2, Array#(Reg#(Data))) model <- replicateM(mkCRegU(2));
-  Randomize#(Bool) randomWriteA <- mkGenericRandomizer;
-  Randomize#(Bool) randomWriteB <- mkGenericRandomizer;
-  Randomize#(Addr) randomAddrA <- mkGenericRandomizer;
-  Randomize#(Addr) randomAddrB <- mkGenericRandomizer;
-  Randomize#(Data) randomDataA <- mkGenericRandomizer;
-  Randomize#(Data) randomDataB <- mkGenericRandomizer;
-  Randomize#(Bool) randomGetA <- mkGenericRandomizer;
-  Randomize#(Bool) randomGetB <- mkGenericRandomizer;
+  Reg#(Bool) writeA <- mkReg(True);
+  Reg#(Data) dataA <- mkReg(0);
+  Reg#(Bool) writeB <- mkReg(True);
+  Reg#(Data) dataB <- mkReg(1000);
+  Reg#(Bool) getB <- mkReg(False);
 
-  RWire#(BRAMRequest#(Addr, Data)) reqAWire <- mkRWire;
-  RWire#(BRAMRequest#(Addr, Data)) reqBWire <- mkRWire;
   Reg#(Addr) addressA <- mkRegU;
   Reg#(Addr) addressB <- mkRegU;
 
@@ -46,61 +41,54 @@ module mkTopBRAM(Empty);
   (* execution_order = "putA, increment" *)
   (* execution_order = "putB, increment" *)
   rule increment;
-    if (cycle == 0) begin
-      randomWriteA.cntrl.init;
-      randomWriteB.cntrl.init;
-      randomAddrA.cntrl.init;
-      randomAddrB.cntrl.init;
-      randomDataA.cntrl.init;
-      randomDataB.cntrl.init;
-      randomGetA.cntrl.init;
-      randomGetB.cntrl.init;
-    end
     $display("Cycle: %d over --------------------------------------------------", cycle);
     cycle <= cycle + 1;
+    getB <= !getB;
   endrule
 
   (* fire_when_enabled *)
   rule putA;
-    let writeA <- randomWriteA.next;
-    let addrA <- randomAddrA.next;
-    let dataA <- randomDataA.next;
+    let addrA = 0;
     let reqA = BRAMRequest {write: writeA, address: addrA, datain: dataA};
 
     m.portA.request.put(reqA);
-    if (writeA) model[addrA][0] <= dataA;
-    else addressA <= addrA;
     $display("PortA request: %s, address %d, data %d", writeA ? "write" : "read", addrA, dataA);
+
+    if (writeA) begin
+      model[addrA][0] <= dataA;
+      dataA <= dataA + 1;
+    end else
+      addressA <= addrA;
+    writeA <= !writeA;
   endrule
 
   (* fire_when_enabled *)
   rule putB;
-    let writeB <- randomWriteB.next;
-    let addrB <- randomAddrB.next;
-    let dataB <- randomDataB.next;
+    let addrB = 0;
     let reqB = BRAMRequest {write: writeB, address: addrB, datain: dataB};
 
     m.portB.request.put(reqB);
-    if (writeB) model[addrB][1] <= dataB; // write ordered after putA
-    else addressB <= addrB;
     $display("PortB request: %s, address %d, data %d", writeB ? "write" : "read", addrB, dataB);
+
+    if (writeB) begin
+      model[addrB][1] <= dataB;
+      dataB <= dataB + 1;
+    end else
+      addressB <= addrB;
+    writeB <= !writeB;
   endrule
 
   (* fire_when_enabled *)
   rule testA;
-    let doResp <- randomGetA.next;
-    if (doResp) begin
-      let resp <- m.portA.response.get;
-      let modelResp = model[addressA][0];
-      countA <= countA + 1;
-      $display("%s: PortA response: %d, model response: %d", resp == modelResp ? "SUCCESS" : "FAILED", resp, modelResp);
-    end
+    let resp <- m.portA.response.get;
+    let modelResp = model[addressA][0];
+    countA <= countA + 1;
+    $display("%s: PortA response: %d, model response: %d", resp == modelResp ? "SUCCESS" : "FAILED", resp, modelResp);
   endrule
 
   (* fire_when_enabled *)
   rule testB;
-    let doResp <- randomGetB.next;
-    if (doResp) begin
+    if (getB) begin
       let resp <- m.portB.response.get;
       let modelResp = model[addressB][0];
       countB <= countB + 1;
