@@ -29,6 +29,7 @@ module mkTopBRAM(Empty);
 
   Reg#(Addr) addressA <- mkRegU;
   Reg#(Addr) addressB <- mkRegU;
+  Reg#(Bool) failure[2] <- mkCReg(2, False);
 
   Reg#(UInt#(32)) countA <- mkReg(0);
   Reg#(UInt#(32)) countB <- mkReg(0);
@@ -57,9 +58,10 @@ module mkTopBRAM(Empty);
     if (writeA) begin
       model[addrA][0] <= dataA;
       dataA <= dataA + 1;
-    end else
-      addressA <= addrA;
+    end
+
     writeA <= !writeA;
+    addressA <= addrA;
   endrule
 
   (* fire_when_enabled *)
@@ -73,9 +75,10 @@ module mkTopBRAM(Empty);
     if (writeB) begin
       model[addrB][1] <= dataB;
       dataB <= dataB + 1;
-    end else
-      addressB <= addrB;
+    end
+
     writeB <= !writeB;
+    addressB <= addrB;
   endrule
 
   (* fire_when_enabled *)
@@ -83,6 +86,8 @@ module mkTopBRAM(Empty);
     let resp <- m.portA.response.get;
     let modelResp = model[addressA][0];
     countA <= countA + 1;
+    if (resp != modelResp)
+      failure[0] <= True;
     $display("%s: PortA response: %d, model response: %d", resp == modelResp ? "SUCCESS" : "FAILED", resp, modelResp);
   endrule
 
@@ -92,12 +97,17 @@ module mkTopBRAM(Empty);
       let resp <- m.portB.response.get;
       let modelResp = model[addressB][0];
       countB <= countB + 1;
+      if (resp != modelResp)
+        failure[1] <= True;
       $display("%s: PortB response: %d, model response: %d", resp == modelResp ? "SUCCESS" : "FAILED", resp, modelResp);
     end
   endrule
 
   (* fire_when_enabled, no_implicit_conditions *)
   rule do_finish;
-    if (countA > threshold && countB > threshold) $finish;
+    if (countA > threshold && countB > threshold) begin
+      if (failure[0]) $display("FAILED!!!");
+      $finish;
+    end
   endrule
 endmodule
