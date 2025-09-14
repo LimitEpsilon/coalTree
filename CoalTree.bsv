@@ -74,70 +74,62 @@ instance Coalescer#(n, k, t) provisos (
     Reg#(Bool) empty[2] <- mkCReg(2, True);
     Reg#(Bool) epoch <- mkReg(False);
 
-    let epochL = l.getEpoch;
-    let epochR = r.getEpoch;
-    let respL = l.first;
-    let respR = r.first;
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule get_result(empty[1]);
+      let rdyL = l.notEmpty;
+      let rdyR = r.notEmpty;
+      let e = epoch;
+      let epochL = l.getEpoch;
+      let epochR = r.getEpoch;
+      let respL = l.first;
+      let respR = r.first;
 
-    CoalResp#(n, k, t) selL = CoalResp {
-      mask: {0, respL.mask},
-      kv: respL.kv
-    }; // select left
+      CoalResp#(n, k, t) selL = CoalResp {
+        mask: {0, respL.mask},
+        kv: respL.kv
+      }; // select left
 
-    CoalResp#(n, k, t) selR = CoalResp {
-      mask: {respR.mask, 0},
-      kv: respR.kv
-    }; // select right
+      CoalResp#(n, k, t) selR = CoalResp {
+        mask: {respR.mask, 0},
+        kv: respR.kv
+      }; // select right
 
-    CoalResp#(n, k, t) selB = CoalResp {
-      mask: {respR.mask, respL.mask},
-      kv: KV {key: respL.kv.key, val: merge(respL.kv.val, respR.kv.val)}
-    }; // select both
+      CoalResp#(n, k, t) selB = CoalResp {
+        mask: {respR.mask, respL.mask},
+        kv: KV {key: respL.kv.key, val: merge(respL.kv.val, respR.kv.val)}
+      }; // select both
 
-    let dir = compare(respL.kv.key, respR.kv.key);
-    let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
+      let dir = compare(respL.kv.key, respR.kv.key);
+      let sel = case (dir) LT: selL; GT: selR; EQ: selB; endcase;
 
-    (* fire_when_enabled *)
-    rule get_result_both(l.notEmpty && r.notEmpty && empty[1]);
-      // $display(fshow("get_result_both, ") + fshow(reqL) + fshow(reqR) + $format("epochL: %b, epochR: %b", epochL, epochR));
-      if (epochL == epochR) begin // update epoch
-        epoch <= epochL;
-        if (respL.mask != 0 && respR.mask != 0) begin
-          out <= sel;
-          if (dir != GT) l.deq;
-          if (dir != LT) r.deq;
-        end else begin
-          out <= respL.mask == 0 ? selR : selL;
-          l.deq; r.deq;
+      if (rdyL) begin
+        if (rdyR) begin
+          if (epochL == epochR) begin // update epoch
+            epoch <= epochL;
+            if (respL.mask != 0 && respR.mask != 0) begin
+              out <= sel;
+              if (dir != GT) l.deq;
+              if (dir != LT) r.deq;
+            end else begin
+              out <= respL.mask == 0 ? selR : selL;
+              l.deq; r.deq;
+            end
+          end else if (e == epochL) begin // reqL cannot be empty
+            out <= selL;
+            l.deq;
+          end else begin // e == epochR
+            out <= selR;
+            r.deq;
+          end
+        end else if (e == epochL) begin
+          out <= selL;
+          l.deq;
         end
-      end else if (epochL == epoch) begin // reqL cannot be empty
-        out <= selL;
-        l.deq;
-      end else begin // epochR == epoch
+      end else if (rdyR && e == epochR) begin
         out <= selR;
         r.deq;
       end
-      empty[1] <= False;
-    endrule
-
-    (* fire_when_enabled *)
-    rule get_result_left(l.notEmpty && !r.notEmpty && empty[1] && epoch == epochL);
-      // && epoch != epochR);
-      // $display(fshow("get_result_left, ") + fshow(reqL) + $format("epochL: %b, epochR: %b", epochL, epochR));
-      out <= selL;
-      l.deq;
-      empty[1] <= False;
-      // else, wait until the right subtree catches up
-    endrule
-
-    (* fire_when_enabled *)
-    rule get_result_right(!l.notEmpty && r.notEmpty && empty[1] && epoch == epochR);
-      // && epoch != epochL);
-      // $display(fshow("get_result_right, ") + fshow(reqR) + $format("epochL: %b, epochR: %b", epochL, epochR));
-      out <= selR;
-      r.deq;
-      empty[1] <= False;
-      // else, wait until the left subtree catches up
+      empty[1] <= (!rdyL || !rdyR && e != epochL) && (!rdyR || e != epochR);
     endrule
 
     method Action enq(CoalReq#(n, k, t) v);

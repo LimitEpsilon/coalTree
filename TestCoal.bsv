@@ -46,21 +46,6 @@ module mkTopCoal(Empty);
       randomEnq.cntrl.init;
       randomInv.cntrl.init;
       randomData.cntrl.init;
-      ram.portA.request.put(BRAMRequest {
-	write: True,
-	responseOnWrite: False,
-	address: 0,
-	datain: 0
-      });
-      ram.portB.request.put(BRAMRequest {
-	write: False,
-	responseOnWrite: False,
-	address: 0,
-	datain: 0
-      });
-    end else if (cycle == 1) begin
-      let r <- ram.portB.response.get;
-      $display("%d", r);
     end
     $display("Cycle: %d over --------------------------------------------------", cycle);
     cycle <= cycle + 1;
