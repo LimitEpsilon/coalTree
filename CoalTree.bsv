@@ -38,20 +38,20 @@ instance Coalescer#(1, k, t) provisos (Bits#(t, tSz), FShow#(t));
   // Base instance of 1-long vector
   module mkCoalTree_#(function t merge(t x, t y)) (CoalTree#(1, k, t));
     Reg#(CoalResp#(1, k, t)) in <- mkReg(CoalResp {mask: 0, kv: unpack(0)});
-    Reg#(Bool) empty[2] <- mkCReg(2, True);
+    Reg#(Bool) rdy[2] <- mkCReg(2, False);
     Reg#(Bool) epoch <- mkReg(True);
 
-    method Action enq(CoalReq#(1, k, t) v) if (empty[1]);
+    method Action enq(CoalReq#(1, k, t) v) if (!rdy[1]);
       in <= CoalResp {mask: pack(isValid(v[0])), kv: fromMaybe(?, v[0])};
-      empty[1] <= False;
+      rdy[1] <= True;
     endmethod
 
-    method notEmpty = !empty[0];
+    method notEmpty = rdy[0];
 
     method getEpoch = epoch;
 
     method Action deq;
-      empty[0] <= True;
+      rdy[0] <= False;
       epoch <= !epoch;
     endmethod // must be called under if (notEmpty)
 
@@ -71,11 +71,11 @@ instance Coalescer#(n, k, t) provisos (
     CoalTree#(hn, k, t) l <- mkCoalTree_(merge);
     CoalTree#(hm, k, t) r <- mkCoalTree_(merge);
     Reg#(CoalResp#(n, k, t)) out <- mkReg(CoalResp {mask: 0, kv: unpack(0)});
-    Reg#(Bool) empty[2] <- mkCReg(2, True);
+    Reg#(Bool) rdy[2] <- mkCReg(2, False);
     Reg#(Bool) epoch <- mkReg(False);
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule get_result(empty[1]);
+    rule get_result(!rdy[1]);
       let rdyL = l.notEmpty;
       let rdyR = r.notEmpty;
       let e = epoch;
@@ -129,7 +129,7 @@ instance Coalescer#(n, k, t) provisos (
         out <= selR;
         r.deq;
       end
-      empty[1] <= (!rdyL || !rdyR && e != epochL) && (!rdyR || e != epochR);
+      rdy[1] <= rdyL && (rdyR || e == epochL) || rdyR && e == epochR;
     endrule
 
     method Action enq(CoalReq#(n, k, t) v);
@@ -137,12 +137,12 @@ instance Coalescer#(n, k, t) provisos (
       r.enq(takeTail(v));
     endmethod
 
-    method notEmpty = !empty[0];
+    method notEmpty = rdy[0];
 
     // method getEpoch = (empty[0] && epoch != epochL) ? epochR : epoch;
     method getEpoch = epoch;
 
-    method Action deq; empty[0] <= True; endmethod // must be called under if (notEmpty)
+    method Action deq; rdy[0] <= False; endmethod // must be called under if (notEmpty)
 
     method first = out;
   endmodule
