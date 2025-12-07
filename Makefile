@@ -12,7 +12,7 @@ test: compile
 	bsc -e mkTopMem -bdir buildDir -info-dir buildDir -simdir buildDir $(BSC_FLAGS) -o simTestMem
 	bsc -e mkTopBRAM -bdir buildDir -info-dir buildDir -simdir buildDir $(BSC_FLAGS) -o simTestBRAM
 	bsc -e mkTopStack -bdir buildDir -info-dir buildDir -simdir buildDir $(BSC_FLAGS) -o simTestStack
-	gcc -o karatsuba karatsuba.c
+	gcc -o buildDir/karatsuba karatsuba.c
 
 all: test
 
